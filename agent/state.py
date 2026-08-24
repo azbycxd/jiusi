@@ -45,6 +45,7 @@ class ControlState(BaseModel):
     """Execution limits and lifecycle, separate from the task context."""
 
     status: AgentStatus = AgentStatus.RUNNING
+    # Number of extra calls after the initial Tool call; it is never the total call count.
     retry_count: int = 0
     tool_call_count: int = 0
     iteration_count: int = 0

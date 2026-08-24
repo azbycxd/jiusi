@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from diagnosis.reason_codes import ReasonCode
 from guardrails.auth_context import AuthContext
+from agent.slots import validate_out_trade_no
+from tools.errors import ToolTimeoutError, to_tool_result
 from tools.schemas import Evidence, ToolResult
 
 
@@ -21,9 +23,12 @@ class JavaMarketClient:
             "202608240005": ToolResult.infrastructure_failure("JAVA_TEMPORARILY_UNAVAILABLE", "Java 服务暂时不可用", retryable=True, source=self.source),
             "202608240006": ToolResult.infrastructure_failure("JAVA_REQUEST_REJECTED", "Java 服务拒绝本次查询", retryable=False, source=self.source),
             "202608240007": self._success("FUTURE_REASON_CODE"),
-            "202608240008": ToolResult.infrastructure_failure("JAVA_TIMEOUT", "Java 服务查询超时", retryable=True, source=self.source),
+            "202608240008": ToolTimeoutError(),
         }
-        return fixtures.get(out_trade_no, self._success(ReasonCode.GROUP_IN_PROGRESS))
+        fixture = fixtures.get(out_trade_no, self._success(ReasonCode.GROUP_IN_PROGRESS))
+        if isinstance(fixture, Exception):
+            raise fixture
+        return fixture
 
     def _success(self, reason_code: ReasonCode | str) -> ToolResult:
         code = reason_code.value if isinstance(reason_code, ReasonCode) else reason_code
@@ -43,7 +48,17 @@ class GetOrderDiagnosisTool:
         self._client = client or JavaMarketClient()
 
     def run(self, state) -> ToolResult:
-        if not state.out_trade_no:
-            return ToolResult(success=False, error_code="MISSING_OUT_TRADE_NO", message="缺少订单号", source="get_order_diagnosis")
+        slot = validate_out_trade_no(state.out_trade_no)
+        if not slot.is_valid:
+            return ToolResult(
+                success=False,
+                error_code=slot.error_code,
+                message="订单号无效或缺失",
+                retryable=False,
+                source="get_order_diagnosis",
+            )
         auth = AuthContext(authenticated_user_id=state.authenticated_user_id)
-        return self._client.get_order_diagnosis(auth=auth, out_trade_no=state.out_trade_no)
+        try:
+            return self._client.get_order_diagnosis(auth=auth, out_trade_no=slot.value)
+        except Exception as error:
+            return to_tool_result(error, source="get_order_diagnosis")

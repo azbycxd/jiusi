@@ -12,7 +12,7 @@ Java 继续负责订单/拼团/活动的真实状态、资格、权限、MySQL�
 
 `AgentState` 分开保存：Capability（显式白名单 Tool）、Context（当前任务槽位、ToolResult 和 evidence）和 Control（状态、重试与次数限制）。Session Memory 只是进程内任务恢复；不是长期记忆。RAG 当前只预留 FAQ/规则检索接口，绝不能判断订单实时状态。
 
-Tool 统一返回 `ToolResult(success, error_code, message, data, evidence, retryable, source)`；不抛异常不等于业务成功。`RUNNING`、`WAITING_USER`、`FINISHED`、`FAILED`、`HANDOFF` 是一等状态，且有最大迭代、Tool 调用、重试及超时配置，禁止无限循环。
+Tool 统一返回 `ToolResult(success, error_code, message, data, evidence, retryable, source)`；不抛异常不等于业务成功。`retry_count` 只计首次调用失败后的额外重试次数，因此 `max_retries=1` 表示首次调用加最多一次重试。所有 `out_trade_no` 来源均须经过同一个确定性 Validator。`RUNNING`、`WAITING_USER`、`FINISHED`、`FAILED`、`HANDOFF` 是一等状态，且有最大迭代、Tool 调用、重试及超时配置，禁止无限循环。
 
 ## 目录
 

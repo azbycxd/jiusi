@@ -1,19 +1,45 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
-from agent.state import AgentState, Intent
+from agent.slots import SlotValidationResult, validate_out_trade_no
+from agent.state import Intent
 
 
-ORDER_PATTERN = re.compile(r"(?<!\d)(\d{6,32})(?!\d)")
+# V1 only extracts unambiguous identifier-shaped tokens that contain a digit. The
+# validator itself accepts broader non-business-specific identifiers for future
+# structured LLM input, so this is not an order-number format rule.
+ORDER_LABEL_PATTERN = re.compile(r"(?:订单号|订单)\s*[:：#]?\s*([^\s，。！？?]+)")
+ORDER_CANDIDATE_PATTERN = re.compile(r"(?<!\S)([A-Za-z0-9._-]*\d[A-Za-z0-9._-]*)(?!\S)")
 DIAGNOSIS_WORDS = ("拼团", "订单", "成功", "为什么", "未成团")
 
 
-def route(state: AgentState, user_query: str) -> None:
-    """V1 deterministic router and slot extractor; no LLM is involved."""
-    state.context.user_query = user_query.strip()
-    match = ORDER_PATTERN.search(user_query)
-    if match:
-        state.context.out_trade_no = match.group(1)
-    if state.intent is Intent.ORDER_DIAGNOSIS or any(word in user_query for word in DIAGNOSIS_WORDS):
-        state.context.intent = Intent.ORDER_DIAGNOSIS
+@dataclass(frozen=True)
+class RoutingResult:
+    """Pure V1 routing output. Applying it to AgentState is the orchestrator's job."""
+
+    normalized_query: str
+    intent: Intent
+    out_trade_no: SlotValidationResult
+    has_out_trade_no_candidate: bool
+
+
+def route(user_query: str, previous_intent: Intent = Intent.UNKNOWN) -> RoutingResult:
+    """V1 deterministic router and slot extractor; it does not mutate AgentState."""
+    normalized_query = user_query.strip()
+    labeled_match = ORDER_LABEL_PATTERN.search(normalized_query)
+    if labeled_match and any(char.isascii() for char in labeled_match.group(1)):
+        candidate = labeled_match.group(1)
+    else:
+        match = ORDER_CANDIDATE_PATTERN.search(normalized_query)
+        candidate = match.group(1) if match else None
+    intent = Intent.ORDER_DIAGNOSIS if (
+        previous_intent is Intent.ORDER_DIAGNOSIS or any(word in normalized_query for word in DIAGNOSIS_WORDS)
+    ) else Intent.UNKNOWN
+    return RoutingResult(
+        normalized_query=normalized_query,
+        intent=intent,
+        out_trade_no=validate_out_trade_no(candidate),
+        has_out_trade_no_candidate=candidate is not None,
+    )
