@@ -2,12 +2,23 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from agent.orchestrator import OrderFactsOrchestrator
+from decision.real_llm import RealLLMConfig, RealLLMDecisionModel
 
 
 app = FastAPI(title="Group Buy Agent", version="0.1.0")
-# No DecisionModel is configured in this Phase 2B HTTP endpoint. The legacy
-# facts-only behavior is intentionally opt-in, not an implicit Agent Loop fallback.
-orchestrator = OrderFactsOrchestrator(compatibility_mode=True)
+
+
+def build_orchestrator() -> tuple[OrderFactsOrchestrator, str]:
+    """Select a real configured model, or the explicit Phase 2B transition mode."""
+    config = RealLLMConfig.from_environment()
+    if config.has_any_value:
+        # Partial/invalid configuration is a startup error, never a silent Fake-model fallback.
+        config.validate()
+        return OrderFactsOrchestrator(decision_model=RealLLMDecisionModel(config)), "dynamic-agent-loop"
+    return OrderFactsOrchestrator(compatibility_mode=True), "phase2b-facts-compatibility"
+
+
+orchestrator, runtime_mode = build_orchestrator()
 
 
 class ChatRequest(BaseModel):
@@ -19,7 +30,7 @@ class ChatRequest(BaseModel):
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "mode": "phase2b-order-facts"}
+    return {"status": "ok", "mode": runtime_mode}
 
 
 @app.post("/v1/chat")

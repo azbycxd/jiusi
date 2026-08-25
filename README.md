@@ -43,4 +43,4 @@ Chat API 不接受用户 ID JSON 参数。生产环境应由认证中间件将�
 
 ## 尚未实现
 
-没有真实 LLM、RAG/向量库、Redis、数据库、长期用户画像、多 Agent、真实认证，或订单/退款写操作。动态 Loop 目前只由 `FakeDecisionModel` 在测试中驱动；实际 HTTP 端点以显式 `compatibility_mode=True` 保留 Phase 2B 的 Facts-only 过渡路径。Java HTTP Client 已完成独立的真实联调验收；本阶段不重复发起 Java 请求。
+没有 RAG/向量库、Redis、数据库、长期用户画像、多 Agent、真实认证，或订单/退款写操作。动态 Loop 现可通过配置化 `RealLLMDecisionModel` 调用 OpenAI-compatible Provider；未配置完整 `LLM_MODEL`、`LLM_API_KEY`、`LLM_BASE_URL` 时，HTTP 端点明确使用 `compatibility_mode=True` 的 Phase 2B Facts-only 过渡路径，部分配置会启动失败而不会回退到 Fake 模型。Java HTTP Client 已完成独立的真实联调验收；本阶段未执行真实 LLM 请求。

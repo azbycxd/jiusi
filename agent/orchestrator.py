@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
 
 from agent.router import RoutingResult, route
 from agent.state import AgentState, AgentStatus
@@ -94,7 +95,10 @@ class OrderFactsOrchestrator:
                 return self._save(state, trace)
             decision = decision_result.decision
             state.context.model_decision = decision.model_dump(mode="json")
-            self._trace(trace, state, stage="MODEL_DECISION", action=decision.action.value)
+            self._trace(
+                trace, state, stage="MODEL_DECISION", action=decision.action.value,
+                started_at=decision_result.started_at, telemetry=decision_result.telemetry,
+            )
 
             if decision.action is AgentAction.ANSWER:
                 state.control.status = AgentStatus.FINISHED
@@ -140,7 +144,7 @@ class OrderFactsOrchestrator:
         for _ in range(state.control.max_model_retries + 1):
             state.control.model_call_count += 1
             started = time.perf_counter()
-            result = self._decision_stage.decide(context)
+            result = replace(self._decision_stage.decide(context), started_at=started)
             if result.error_code is None:
                 return result
             self._trace(
@@ -150,9 +154,10 @@ class OrderFactsOrchestrator:
                 action="validate_decision",
                 error_code=result.error_code,
                 started_at=started,
+                telemetry=result.telemetry,
             )
             remaining = state.control.max_model_retries - state.control.model_retry_count
-            if result.error_code in {"MODEL_SCHEMA_INVALID", "MODEL_INVOCATION_ERROR"} and remaining > 0:
+            if result.retryable and remaining > 0:
                 state.control.model_retry_count += 1
                 continue
             return result
@@ -249,6 +254,7 @@ class OrderFactsOrchestrator:
         tool_success: bool | None = None,
         error_code: str | None = None,
         started_at: float | None = None,
+        telemetry=None,
     ) -> None:
         trace.record(
             session_id=state.session_id,
@@ -263,6 +269,10 @@ class OrderFactsOrchestrator:
             retry_count=state.retry_count,
             model_call_count=state.model_call_count,
             model_retry_count=state.model_retry_count,
+            model=telemetry.model if telemetry else None,
+            input_tokens=telemetry.input_tokens if telemetry else None,
+            output_tokens=telemetry.output_tokens if telemetry else None,
+            total_tokens=telemetry.total_tokens if telemetry else None,
         )
 
     def _save(self, state: AgentState, trace: TraceRecorder | None = None) -> AgentState:
