@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from agent.orchestrator import OrderDiagnosisOrchestrator
+from agent.orchestrator import OrderFactsOrchestrator
 
 
 app = FastAPI(title="Group Buy Agent", version="0.1.0")
-orchestrator = OrderDiagnosisOrchestrator()
+# No DecisionModel is configured in this Phase 2B HTTP endpoint. The legacy
+# facts-only behavior is intentionally opt-in, not an implicit Agent Loop fallback.
+orchestrator = OrderFactsOrchestrator(compatibility_mode=True)
 
 
 class ChatRequest(BaseModel):
@@ -17,7 +19,7 @@ class ChatRequest(BaseModel):
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "mode": "v1-stub"}
+    return {"status": "ok", "mode": "phase2b-order-facts"}
 
 
 @app.post("/v1/chat")

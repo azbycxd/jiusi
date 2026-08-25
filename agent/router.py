@@ -12,7 +12,7 @@ from agent.state import Intent
 # structured LLM input, so this is not an order-number format rule.
 ORDER_LABEL_PATTERN = re.compile(r"(?:订单号|订单)\s*[:：#]?\s*([^\s，。！？?]+)")
 ORDER_CANDIDATE_PATTERN = re.compile(r"(?<!\S)([A-Za-z0-9._-]*\d[A-Za-z0-9._-]*)(?!\S)")
-DIAGNOSIS_WORDS = ("拼团", "订单", "成功", "为什么", "未成团")
+ORDER_FACTS_WORDS = ("拼团", "订单", "查询", "状态", "成功", "为什么", "未成团")
 
 
 @dataclass(frozen=True)
@@ -34,8 +34,8 @@ def route(user_query: str, previous_intent: Intent = Intent.UNKNOWN) -> RoutingR
     else:
         match = ORDER_CANDIDATE_PATTERN.search(normalized_query)
         candidate = match.group(1) if match else None
-    intent = Intent.ORDER_DIAGNOSIS if (
-        previous_intent is Intent.ORDER_DIAGNOSIS or any(word in normalized_query for word in DIAGNOSIS_WORDS)
+    intent = Intent.ORDER_FACTS if (
+        previous_intent is Intent.ORDER_FACTS or any(word in normalized_query for word in ORDER_FACTS_WORDS)
     ) else Intent.UNKNOWN
     return RoutingResult(
         normalized_query=normalized_query,
