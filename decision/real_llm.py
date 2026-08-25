@@ -1,0 +1,185 @@
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+from typing import Any
+
+import httpx
+
+from config.environment import load_project_env
+from decision.errors import (
+    ModelConnectionError,
+    ModelHttpError,
+    ModelInvalidResponseError,
+    ModelRateLimitedError,
+    ModelTimeoutError,
+)
+from decision.schemas import DecisionContext
+from decision.telemetry import ModelTelemetry
+
+
+SYSTEM_PROMPT = """You are the decision module for a group-buy customer-service Agent.
+Do not operate databases or systems. Use only the user query, business facts, evidence,
+and allowed tools provided in the current context. Choose exactly one next action:
+CALL_TOOL, ANSWER, or HANDOFF.
+
+Return one JSON object only. Choose exactly one action and output only that action's fields:
+CALL_TOOL: action, tool_name, tool_arguments.
+ANSWER: action, final_answer, used_evidence.
+HANDOFF: action, missing_information.
+
+The available_tools list is the complete set of capabilities you can execute,
+not examples. Never assume an unlisted tool, business query, real-time source,
+or rule knowledge exists. If platform-specific facts or rules are required but
+are absent from current facts and cannot be obtained by an available tool,
+choose HANDOFF and name the missing information.
+
+Do not output irrelevant fields as null, empty strings, empty objects, or empty arrays;
+omit them entirely. HANDOFF is control only: never include a user-facing business answer.
+
+For CALL_TOOL, request only an allowed tool and only its published arguments. If current
+facts are insufficient for a real-time order question, use get_order_facts when available.
+Never provide userId, authenticated_user_id, headers, SQL, base_url, teamId, or activityId.
+For ANSWER about a specific order, use only supplied facts/evidence and cite existing fact
+paths in used_evidence. Do not invent payment, refund, notification, other-user, database,
+or Java facts. Use HANDOFF when the available tools and facts cannot safely answer.
+Do not output chain-of-thought or internal reasoning."""
+
+
+@dataclass(frozen=True)
+class RealLLMConfig:
+    """Configuration for an OpenAI-compatible chat-completions provider."""
+
+    model: str | None
+    api_key: str | None
+    base_url: str | None
+    timeout_seconds: float = 10.0
+
+    @classmethod
+    def from_environment(cls) -> "RealLLMConfig":
+        load_project_env()
+        raw_timeout = os.getenv("LLM_TIMEOUT")
+        if raw_timeout is None or not raw_timeout.strip():
+            timeout = 10.0
+        else:
+            try:
+                timeout = float(raw_timeout)
+            except ValueError as error:
+                raise ValueError("LLM_TIMEOUT must be a number") from error
+        return cls(
+            model=os.getenv("LLM_MODEL") or None,
+            api_key=os.getenv("LLM_API_KEY") or None,
+            base_url=os.getenv("LLM_BASE_URL") or None,
+            timeout_seconds=timeout,
+        )
+
+    @property
+    def has_any_value(self) -> bool:
+        return any((self.model, self.api_key, self.base_url))
+
+    def validate(self) -> None:
+        if not self.model or not self.api_key or not self.base_url:
+            raise ValueError("LLM_MODEL, LLM_API_KEY, and LLM_BASE_URL must all be configured")
+        if self.timeout_seconds <= 0:
+            raise ValueError("LLM_TIMEOUT must be greater than zero")
+
+
+class RealLLMDecisionModel:
+    """Synchronous, mockable OpenAI-compatible DecisionModel implementation."""
+
+    def __init__(self, config: RealLLMConfig | None = None, http_client: httpx.Client | None = None) -> None:
+        self._config = config or RealLLMConfig.from_environment()
+        self._config.validate()
+        self._http_client = http_client or httpx.Client(timeout=self._config.timeout_seconds, trust_env=False)
+        self.last_telemetry: ModelTelemetry | None = None
+
+    @property
+    def model_name(self) -> str:
+        return self._config.model or ""
+
+    def build_payload(self, context: DecisionContext) -> dict[str, Any]:
+        """Build the complete provider body from the deliberately minimal DecisionContext."""
+        visible_context = {
+            "user_query": context.user_query,
+            "available_tools": [tool.model_dump(mode="json") for tool in context.available_tools],
+            "facts": context.facts,
+            "evidence": context.evidence,
+        }
+        return {
+            "model": self._config.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(visible_context, ensure_ascii=False)},
+            ],
+        }
+
+    def decide(self, context: DecisionContext) -> object:
+        self.last_telemetry = None
+        try:
+            response = self._http_client.post(
+                self._endpoint(),
+                json=self.build_payload(context),
+                headers={"Authorization": f"Bearer {self._config.api_key}", "Content-Type": "application/json"},
+            )
+        except httpx.TimeoutException as error:
+            raise ModelTimeoutError() from error
+        except httpx.ConnectError as error:
+            raise ModelConnectionError() from error
+        except httpx.HTTPError as error:
+            raise ModelHttpError() from error
+
+        if response.status_code == 429:
+            raise ModelRateLimitedError()
+        if not 200 <= response.status_code < 300:
+            error = ModelHttpError()
+            error.retryable = response.status_code >= 500
+            raise error
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise ModelInvalidResponseError() from error
+        content = self._content_from_payload(payload)
+        self.last_telemetry = self._telemetry_from_payload(payload)
+        if isinstance(content, dict):
+            return content
+        if not isinstance(content, str) or not content.strip():
+            raise ModelInvalidResponseError()
+        try:
+            parsed = json.loads(content)
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ModelInvalidResponseError() from error
+        if not isinstance(parsed, dict):
+            raise ModelInvalidResponseError()
+        return parsed
+
+    def _endpoint(self) -> str:
+        assert self._config.base_url
+        base_url = self._config.base_url.rstrip("/")
+        return base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
+
+    @staticmethod
+    def _content_from_payload(payload: Any) -> Any:
+        if not isinstance(payload, dict):
+            raise ModelInvalidResponseError()
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            raise ModelInvalidResponseError()
+        message = choices[0].get("message")
+        if not isinstance(message, dict):
+            raise ModelInvalidResponseError()
+        return message.get("content")
+
+    def _telemetry_from_payload(self, payload: dict[str, Any]) -> ModelTelemetry:
+        usage = payload.get("usage")
+        usage = usage if isinstance(usage, dict) else {}
+        return ModelTelemetry(
+            model=str(payload.get("model") or self._config.model),
+            input_tokens=self._safe_int(usage.get("prompt_tokens")),
+            output_tokens=self._safe_int(usage.get("completion_tokens")),
+            total_tokens=self._safe_int(usage.get("total_tokens")),
+        )
+
+    @staticmethod
+    def _safe_int(value: Any) -> int | None:
+        return value if isinstance(value, int) and value >= 0 else None
