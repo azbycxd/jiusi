@@ -8,6 +8,7 @@ import httpx
 from pydantic import ValidationError
 
 from agent.slots import validate_out_trade_no
+from config.environment import load_project_env
 from guardrails.auth_context import AuthContext
 from tools.errors import ToolConnectionError, ToolTimeoutError, to_tool_result
 from tools.facts import OrderFacts
@@ -26,6 +27,7 @@ class JavaMarketClientConfig:
 
     @classmethod
     def from_environment(cls) -> "JavaMarketClientConfig":
+        load_project_env()
         raw_timeout = os.getenv("JAVA_MARKET_TIMEOUT_SECONDS", "2.0")
         try:
             timeout_seconds = float(raw_timeout)
