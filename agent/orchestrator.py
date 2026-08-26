@@ -41,7 +41,11 @@ class OrderFactsOrchestrator:
 
     def handle_message(self, session_id: str, authenticated_user_id: str, user_query: str) -> AgentState:
         state = self.memory.load_state(session_id)
-        if state is None or state.authenticated_user_id != authenticated_user_id:
+        if (
+            state is None
+            or state.authenticated_user_id != authenticated_user_id
+            or state.status in {AgentStatus.FINISHED, AgentStatus.FAILED, AgentStatus.HANDOFF}
+        ):
             state = AgentState(session_id=session_id, authenticated_user_id=authenticated_user_id)
 
         state.control.status = AgentStatus.RUNNING

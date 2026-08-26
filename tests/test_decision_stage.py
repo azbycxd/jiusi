@@ -184,6 +184,15 @@ def test_no_model_requires_explicit_compatibility_mode() -> None:
         OrderFactsOrchestrator(registry=ToolRegistry([OrderFactsTool(FakeMarketClient({}))]))
 
 
+def test_terminal_session_starts_a_new_task_but_waiting_session_still_resumes() -> None:
+    agent, _, _ = decision_agent([answer(evidence=[]), answer(evidence=[])])
+    first = agent.handle_message("loop-terminal", "trusted-user", "你能做什么？")
+    second = agent.handle_message("loop-terminal", "trusted-user", "你能做什么？")
+    assert first.status is AgentStatus.FINISHED and second.status is AgentStatus.FINISHED
+    assert second.iteration_count == 1
+    assert second.tool_call_count == 0 and second.context.tool_call_history == []
+
+
 def test_agent_decision_and_context_are_strict() -> None:
     try:
         parse_agent_decision({"action": "ANSWER", "final_answer": "x", "tool_name": "get_order_facts"})

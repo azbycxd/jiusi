@@ -8,6 +8,11 @@ from dataclasses import dataclass, asdict
 
 
 logger = logging.getLogger("group_buy_agent.trace")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(handler)
 
 
 @dataclass(frozen=True)
