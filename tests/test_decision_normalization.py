@@ -7,7 +7,7 @@ from agent.state import Observation
 from decision.normalization import normalize_agent_decision_payload
 from decision.schemas import AnswerDecision, CallToolDecision, HandoffDecision, parse_agent_decision
 from decision.validation import canonicalize_evidence_paths, validate_evidence
-from tools.arguments import normalize_order_facts_arguments
+from tools.arguments import OrderFactsArguments
 from tools.schemas import Evidence
 
 
@@ -103,5 +103,6 @@ def test_sensitive_argument_and_unknown_tool_are_never_rewritten() -> None:
     arguments = {"outTradeNo": "202608240001", "userId": "xfg05"}
     normalized = normalize_agent_decision_payload(call_tool(tool_arguments=arguments))
     assert normalized["tool_arguments"] == arguments
-    assert normalize_order_facts_arguments(normalized["tool_arguments"]) is None
+    with pytest.raises(ValidationError):
+        OrderFactsArguments.model_validate(normalized["tool_arguments"])
     assert normalize_agent_decision_payload(call_tool(tool_name="refund_order"))["tool_name"] == "refund_order"

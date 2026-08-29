@@ -4,6 +4,8 @@ import json
 import time
 from dataclasses import replace
 
+from pydantic import BaseModel
+
 from agent.router import RoutingResult, route
 from agent.state import AgentState, AgentStatus, Observation
 from agent.termination import TerminationPolicy
@@ -83,7 +85,12 @@ class OrderFactsOrchestrator:
             self._trace(trace, state, stage="WAITING_SLOT", action="request_out_trade_no")
             return self._save(state, trace)
         state.context.missing_fields = []
-        if self._execute_tool(state, trace, "get_order_facts"):
+        invocation = self.registry.legacy_invocation(state)
+        if invocation is None:
+            TerminationPolicy.handoff(state, "当前兼容流程无法构建工具参数，已转人工客服处理。")
+            return self._save(state, trace)
+        tool_name, arguments = invocation
+        if self._execute_tool(state, trace, tool_name, arguments):
             state.control.status = AgentStatus.FINISHED
             state.control.final_answer = "FACTS_RETRIEVED"
         return self._save(state, trace)
@@ -116,7 +123,7 @@ class OrderFactsOrchestrator:
             if arguments is None:
                 TerminationPolicy.handoff(state, "模型请求的工具或参数不符合安全策略，已转人工客服处理。")
                 return self._save(state, trace)
-            signature = f"{decision.tool_name}:{json.dumps(arguments, sort_keys=True, ensure_ascii=True)}"
+            signature = f"{decision.tool_name}:{json.dumps(arguments.model_dump(by_alias=True), sort_keys=True, ensure_ascii=True)}"
             if signature in state.context.tool_call_history:
                 self._trace(
                     trace, state, stage="MODEL_VALIDATION_ERROR", action="duplicate_tool_call",
@@ -127,10 +134,9 @@ class OrderFactsOrchestrator:
             if TerminationPolicy.enforce(state):
                 return self._save(state, trace)
 
-            state.context.out_trade_no = arguments["outTradeNo"]
             state.context.missing_fields = []
             state.context.tool_call_history.append(signature)
-            if not self._execute_tool(state, trace, decision.tool_name):
+            if not self._execute_tool(state, trace, decision.tool_name, arguments):
                 return self._save(state, trace)
             # A completed observation starts the next Decision/Reason turn.
             state.control.iteration_count += 1
@@ -168,7 +174,7 @@ class OrderFactsOrchestrator:
 
     def _validate_tool_action(
         self, state: AgentState, trace: TraceRecorder, tool_name: str | None, arguments: object
-    ) -> dict[str, str] | None:
+    ) -> BaseModel | None:
         if not tool_name or tool_name not in state.capability.allowed_tools:
             self._trace(trace, state, stage="MODEL_VALIDATION_ERROR", action="validate_capability", error_code="MODEL_TOOL_NOT_ALLOWED")
             return None
@@ -181,7 +187,7 @@ class OrderFactsOrchestrator:
             return None
         return normalized
 
-    def _execute_tool(self, state: AgentState, trace: TraceRecorder, tool_name: str) -> bool:
+    def _execute_tool(self, state: AgentState, trace: TraceRecorder, tool_name: str, arguments: BaseModel) -> bool:
         """Run one harness-approved Tool with the existing finite Tool retry policy."""
         for _ in range(state.control.max_retries + 1):
             if TerminationPolicy.enforce(state):
@@ -190,7 +196,7 @@ class OrderFactsOrchestrator:
             started = time.perf_counter()
             self._trace(trace, state, stage="TOOL_CALL", action=tool_name, tool_name=tool_name)
             try:
-                result = self.registry.call(tool_name, state)
+                result = self.registry.call(tool_name, state, arguments)
             except Exception as error:
                 result = to_tool_result(error, source="orchestrator")
             self._apply_tool_result(state, tool_name, result)

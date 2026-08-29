@@ -12,6 +12,7 @@ from agent.router import route
 from agent.state import AgentState, AgentStatus, Intent
 from guardrails.auth_context import AuthContext
 from tools.fake_market_client import FakeMarketClient
+from tools.arguments import OrderFactsArguments
 from tools.java_market_client import JavaMarketClient, JavaMarketClientConfig, OrderFactsTool
 from tools.registry import ToolRegistry
 from tools.schemas import Evidence, ToolResult
@@ -198,7 +199,8 @@ def test_router_and_tool_remain_state_side_effect_free() -> None:
     before_router = state.model_dump()
     assert route("查询订单 202608240001", state.intent).intent is Intent.ORDER_FACTS
     assert state.model_dump() == before_router
-    state.context.out_trade_no = "202608240001"
     before_tool = state.model_dump()
-    assert OrderFactsTool(FakeMarketClient({"202608240001": facts_result()})).run(state).success
+    assert OrderFactsTool(FakeMarketClient({"202608240001": facts_result()})).run(
+        state, OrderFactsArguments(outTradeNo="202608240001")
+    ).success
     assert state.model_dump() == before_tool

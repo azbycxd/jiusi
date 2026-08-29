@@ -124,6 +124,14 @@ def test_tool_identity_comes_from_state_not_model_arguments() -> None:
     assert market.calls[0][0].authenticated_user_id == "trusted-user"
 
 
+def test_dynamic_tool_arguments_do_not_need_or_overwrite_state_slot() -> None:
+    agent, _, market = decision_agent([call_facts(), answer()])
+    state = agent.handle_message("loop-argument-state", "trusted-user", "请查询订单")
+    assert state.status is AgentStatus.FINISHED
+    assert state.out_trade_no is None
+    assert market.calls[0][1] == "202608240001"
+
+
 def test_answer_with_fabricated_evidence_is_rejected(caplog) -> None:
     caplog.set_level(logging.INFO, logger="group_buy_agent.trace")
     agent, _, market = decision_agent([call_facts(), answer(["payment.failed"])])

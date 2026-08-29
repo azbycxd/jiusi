@@ -8,8 +8,10 @@ import httpx
 from pydantic import ValidationError
 
 from agent.slots import validate_out_trade_no
+from agent.state import AgentState
 from config.environment import load_project_env
 from guardrails.auth_context import AuthContext
+from tools.arguments import OrderFactsArguments
 from tools.errors import ToolConnectionError, ToolTimeoutError, to_tool_result
 from tools.facts import OrderFacts
 from tools.base import MarketClient
@@ -141,26 +143,29 @@ class JavaMarketClient:
 
 class OrderFactsTool:
     name = "get_order_facts"
+    description = "Read trusted order, team, activity, and reference facts for an external order number."
+    arguments_schema = OrderFactsArguments
 
     def __init__(self, client: MarketClient | None = None) -> None:
         self._client = client or JavaMarketClient()
 
-    def run(self, state) -> ToolResult:
-        slot = validate_out_trade_no(state.out_trade_no)
-        if not slot.is_valid:
-            return ToolResult(
-                success=False,
-                error_code=slot.error_code,
-                message="订单号无效或缺失",
-                retryable=False,
-                source=self.name,
-            )
+    @staticmethod
+    def arguments_from_legacy_state(state: AgentState) -> OrderFactsArguments | None:
+        """Phase 2B compatibility adapter; normal LLM Tool calls never read this slot."""
+        if state.out_trade_no is None:
+            return None
+        try:
+            return OrderFactsArguments(outTradeNo=state.out_trade_no)
+        except ValidationError:
+            return None
+
+    def run(self, state: AgentState, arguments: OrderFactsArguments) -> ToolResult:
         if not isinstance(state.authenticated_user_id, str) or not state.authenticated_user_id.strip():
             return ToolResult.infrastructure_failure(
                 "AUTH_REQUIRED", "缺少可信认证身份，无法查询订单事实", retryable=False, source=self.name
             )
         auth = AuthContext(authenticated_user_id=state.authenticated_user_id)
         try:
-            return self._client.get_order_facts(auth=auth, out_trade_no=slot.value)
+            return self._client.get_order_facts(auth=auth, out_trade_no=arguments.out_trade_no)
         except Exception as error:
             return to_tool_result(error, source=self.name)

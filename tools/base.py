@@ -1,14 +1,21 @@
-from typing import Protocol
+from typing import Protocol, runtime_checkable
+
+from pydantic import BaseModel
 
 from agent.state import AgentState
 from guardrails.auth_context import AuthContext
 from tools.schemas import ToolResult
 
 
-class Tool(Protocol):
-    name: str
+@runtime_checkable
+class AgentTool(Protocol):
+    """Self-described Tool contract; registry infrastructure owns no business metadata."""
 
-    def run(self, state: AgentState) -> ToolResult: ...
+    name: str
+    description: str
+    arguments_schema: type[BaseModel]
+
+    def run(self, state: AgentState, arguments: BaseModel) -> ToolResult: ...
 
 
 class MarketClient(Protocol):
