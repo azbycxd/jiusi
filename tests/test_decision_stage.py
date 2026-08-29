@@ -5,8 +5,9 @@ import logging
 
 import pytest
 
+import agent.orchestrator as orchestrator_module
 from agent.orchestrator import OrderFactsOrchestrator
-from agent.state import AgentStatus, Observation
+from agent.state import AgentStatus, Intent, Observation
 from decision.model import FakeDecisionModel
 from decision.schemas import DecisionContext, parse_agent_decision
 from tools.fake_market_client import FakeMarketClient
@@ -97,6 +98,46 @@ def test_first_decision_answer_needs_no_tool_or_facts() -> None:
     assert state.tool_call_count == 0 and market.calls == []
     assert state.observations == []
     assert model.contexts[0].observations == []
+
+
+def test_dynamic_path_does_not_invoke_legacy_router_and_traces_input_prepared(monkeypatch, caplog) -> None:
+    caplog.set_level(logging.INFO, logger="group_buy_agent.trace")
+
+    def legacy_router_must_not_run(*_args, **_kwargs):
+        raise AssertionError("dynamic Agent Path must not invoke the legacy router")
+
+    monkeypatch.setattr(orchestrator_module, "route", legacy_router_must_not_run)
+    agent, model, market = decision_agent([answer(evidence=[])])
+    state = agent.handle_message("loop-no-router", "trusted-user", "   我能获得什么帮助？   ")
+
+    assert state.status is AgentStatus.FINISHED
+    assert state.user_query == "我能获得什么帮助？"
+    assert state.intent is Intent.UNKNOWN and state.out_trade_no is None
+    assert len(model.contexts) == 1 and market.calls == []
+    stages = [json.loads(record.message)["stage"] for record in caplog.records]
+    assert "INPUT_PREPARED" in stages
+    assert "ROUTED" not in stages
+
+
+def test_dynamic_no_keyword_question_reaches_llm_and_tool_arguments_not_legacy_slots() -> None:
+    agent, model, market = decision_agent([call_facts(), answer()])
+    state = agent.handle_message("loop-no-keywords", "trusted-user", "我这个团怎么还没凑齐？")
+
+    assert state.status is AgentStatus.FINISHED
+    assert len(model.contexts) == 2 and len(market.calls) == 1
+    assert state.intent is Intent.UNKNOWN and state.out_trade_no is None
+    assert market.calls[0][1] == "202608240001"
+
+
+def test_refund_question_reaches_decision_stage_before_handoff() -> None:
+    agent, model, market = decision_agent([
+        {"action": "HANDOFF", "missing_information": ["refund facts"]}
+    ])
+    state = agent.handle_message("loop-refund-decision", "trusted-user", "我的退款什么时候到账？")
+
+    assert state.status is AgentStatus.HANDOFF
+    assert state.model_call_count == 1 and len(model.contexts) == 1
+    assert state.tool_call_count == 0 and market.calls == []
 
 
 def test_unallowed_refund_tool_is_rejected_without_execution() -> None:
@@ -212,7 +253,8 @@ def test_handoff_action_does_not_execute_tool() -> None:
     assert "refund status" not in (state.final_answer or "")
 
 
-def test_no_model_uses_explicit_facts_compatibility_path() -> None:
+def test_no_model_uses_explicit_facts_compatibility_path(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="group_buy_agent.trace")
     market = FakeMarketClient({"202608240001": facts_result()})
     agent = OrderFactsOrchestrator(
         registry=ToolRegistry([OrderFactsTool(market)]), compatibility_mode=True
@@ -221,6 +263,8 @@ def test_no_model_uses_explicit_facts_compatibility_path() -> None:
     assert state.status is AgentStatus.FINISHED
     assert state.final_answer == "FACTS_RETRIEVED"
     assert state.model_call_count == 0 and state.tool_call_count == 1
+    events = [json.loads(record.message) for record in caplog.records]
+    assert any(event["stage"] == "ROUTED" and event["action"] == "legacy_route" for event in events)
 
 
 def test_no_model_requires_explicit_compatibility_mode() -> None:

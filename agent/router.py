@@ -17,7 +17,7 @@ ORDER_FACTS_WORDS = ("拼团", "订单", "查询", "状态", "成功", "为什�
 
 @dataclass(frozen=True)
 class RoutingResult:
-    """Pure V1 routing output. Applying it to AgentState is the orchestrator's job."""
+    """Legacy compatibility routing output; it is not part of the dynamic Agent Path."""
 
     normalized_query: str
     intent: Intent
@@ -26,7 +26,7 @@ class RoutingResult:
 
 
 def route(user_query: str, previous_intent: Intent = Intent.UNKNOWN) -> RoutingResult:
-    """V1 deterministic router and slot extractor; it does not mutate AgentState."""
+    """V1 compatibility intent router and slot extractor; it does not mutate AgentState."""
     normalized_query = user_query.strip()
     labeled_match = ORDER_LABEL_PATTERN.search(normalized_query)
     if labeled_match and any(char.isascii() for char in labeled_match.group(1)):

@@ -55,15 +55,18 @@ class OrderFactsOrchestrator:
         state.control.final_answer = None
         state.control.iteration_count += 1
         trace = TraceRecorder()
-        routing = route(user_query, state.intent)
-        self._apply_routing_result(state, routing)
-        self._trace(trace, state, stage="ROUTED", action="route")
-
-        if TerminationPolicy.enforce(state):
-            return self._save(state, trace)
         if self._decision_stage:
+            state.context.user_query = user_query.strip()
+            self._trace(trace, state, stage="INPUT_PREPARED", action="normalize_input")
+            if TerminationPolicy.enforce(state):
+                return self._save(state, trace)
             return self._run_agent_loop(state, trace)
         # This branch is opt-in only; it keeps the pre-LLM Phase 2B HTTP harness runnable.
+        routing = route(user_query, state.intent)
+        self._apply_legacy_routing_result(state, routing)
+        self._trace(trace, state, stage="ROUTED", action="legacy_route")
+        if TerminationPolicy.enforce(state):
+            return self._save(state, trace)
         return self._run_facts_compatibility_flow(state, routing, trace)
 
     def _run_facts_compatibility_flow(
@@ -229,7 +232,7 @@ class OrderFactsOrchestrator:
         return False
 
     @staticmethod
-    def _apply_routing_result(state: AgentState, routing: RoutingResult) -> None:
+    def _apply_legacy_routing_result(state: AgentState, routing: RoutingResult) -> None:
         state.context.user_query = routing.normalized_query
         state.context.intent = routing.intent
         if routing.out_trade_no.is_valid:

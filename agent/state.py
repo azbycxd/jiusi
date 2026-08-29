@@ -74,6 +74,7 @@ class ContextState(BaseModel):
     """Information visible to the next controlled reasoning step for this task."""
 
     user_query: str = ""
+    # V1 compatibility-only routing state. The dynamic Agent Path does not write or read it.
     intent: Intent = Intent.UNKNOWN
     out_trade_no: str | None = None
     team_id: str | None = None
