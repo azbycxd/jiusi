@@ -24,10 +24,18 @@ class Intent(str, Enum):
 class CapabilityState(BaseModel):
     """What the agent is permitted to do; never inferred by scanning code."""
 
-    allowed_tools: tuple[str, ...] = ("get_order_facts",)
+    allowed_tools: tuple[str, ...] = ("get_order_facts", "get_joinable_team_facts")
 
 
 def _data_paths(value: object, prefix: str = "") -> dict[str, str]:
+    if isinstance(value, list):
+        if not value:
+            return {prefix: str(value)} if prefix else {}
+        paths: dict[str, str] = {}
+        for index, child in enumerate(value):
+            item_prefix = f"{prefix}.{index}" if prefix else str(index)
+            paths.update(_data_paths(child, item_prefix))
+        return paths
     if not isinstance(value, dict):
         return {prefix: str(value)} if prefix else {}
     paths: dict[str, str] = {}

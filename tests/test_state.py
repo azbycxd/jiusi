@@ -7,7 +7,7 @@ from tools.schemas import Evidence, ToolResult
 
 def test_state_has_separated_capability_context_and_control() -> None:
     state = AgentState(session_id="s-1", authenticated_user_id="trusted-user")
-    assert state.capability.allowed_tools == ("get_order_facts",)
+    assert state.capability.allowed_tools == ("get_order_facts", "get_joinable_team_facts")
     assert state.intent is Intent.UNKNOWN
     assert state.status is AgentStatus.RUNNING
     assert state.authenticated_user_id == "trusted-user"
@@ -55,3 +55,22 @@ def test_observation_requires_successful_result_and_evidence_matching_data() -> 
             data={"order": {"status": "CLOSE"}},
             evidence=[Evidence(kind="get_order_facts.order.status", value="OPEN", source="test")],
         )
+
+
+def test_empty_list_is_a_terminal_evidence_path_but_its_children_remain_invalid() -> None:
+    observation = Observation(
+        tool_name="get_joinable_team_facts",
+        data={"candidate_teams": []},
+        evidence=[Evidence(kind="get_joinable_team_facts.candidate_teams", value="[]", source="test")],
+    )
+    assert observation.evidence[0].value == "[]"
+    for invalid_path in (
+        "get_joinable_team_facts.candidate_teams.0",
+        "get_joinable_team_facts.candidate_teams.0.team_id",
+    ):
+        with pytest.raises(ValueError, match="match normalized observation data"):
+            Observation(
+                tool_name="get_joinable_team_facts",
+                data={"candidate_teams": []},
+                evidence=[Evidence(kind=invalid_path, value="T1", source="test")],
+            )

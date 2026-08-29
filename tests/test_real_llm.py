@@ -8,11 +8,11 @@ import pytest
 
 from agent.orchestrator import OrderFactsOrchestrator
 from agent.state import AgentStatus, Observation
-from decision.real_llm import RealLLMConfig, RealLLMDecisionModel
+from decision.real_llm import SYSTEM_PROMPT, RealLLMConfig, RealLLMDecisionModel
 from decision.schemas import DecisionContext
 from decision.stage import DecisionStage
 from tools.fake_market_client import FakeMarketClient
-from tools.java_market_client import OrderFactsTool
+from tools.java_market_client import JoinableTeamFactsTool, OrderFactsTool
 from tools.registry import ToolRegistry
 from tools.schemas import Evidence
 
@@ -22,6 +22,16 @@ def context(*, observations: list[Observation] | None = None) -> DecisionContext
         user_query="为什么订单还没有拼团成功？",
         observations=observations or [],
         available_tools=ToolRegistry([OrderFactsTool(FakeMarketClient({}))]).available_tools,
+    )
+
+
+def multi_tool_context() -> DecisionContext:
+    return DecisionContext(
+        user_query="这个活动还能加入哪些团？",
+        observations=[],
+        available_tools=ToolRegistry([
+            OrderFactsTool(FakeMarketClient({})), JoinableTeamFactsTool(object())
+        ]).available_tools,
     )
 
 
@@ -70,6 +80,43 @@ def test_real_adapter_converts_legal_call_tool_response_and_uses_safe_payload() 
     assert result.telemetry is not None and result.telemetry.total_tokens == 18
 
 
+def test_prompt_and_provider_payload_follow_dynamic_tool_contracts_without_fixed_workflow() -> None:
+    assert "activityId" not in SYSTEM_PROMPT
+    assert "outTradeNo" not in SYSTEM_PROMPT
+    assert "parameters_schema" in SYSTEM_PROMPT
+    assert "validated observations/evidence" in SYSTEM_PROMPT
+    assert "only paths that exist in DecisionContext.evidence" in SYSTEM_PROMPT
+    assert "evidence entry's kind field" in SYSTEM_PROMPT
+    assert "evidence[0]" in SYSTEM_PROMPT
+    assert "available_tools metadata" in SYSTEM_PROMPT
+    assert "must set used_evidence to []" in SYSTEM_PROMPT
+    assert "you can do" not in SYSTEM_PROMPT.lower()
+    for forbidden in ("userId", "authenticated_user_id", "token", "headers", "auth context", "SQL", "base_url"):
+        assert forbidden in SYSTEM_PROMPT
+    assert "get_order_facts -> get_joinable_team_facts" not in SYSTEM_PROMPT
+
+    context_with_two_tools = multi_tool_context()
+    payload = model_with(lambda _: httpx.Response(500)).build_payload(context_with_two_tools)
+    visible = json.loads(payload["messages"][1]["content"])
+    schemas = {tool["name"]: tool["parameters_schema"] for tool in visible["available_tools"]}
+    assert schemas["get_order_facts"]["required"] == ["outTradeNo"]
+    assert schemas["get_joinable_team_facts"]["required"] == ["activityId"]
+
+
+def test_real_adapter_accepts_legal_joinable_tool_decision_from_dynamic_metadata() -> None:
+    response = json.dumps({
+        "action": "CALL_TOOL", "tool_name": "get_joinable_team_facts", "tool_arguments": {"activityId": 100123},
+    })
+    context_with_two_tools = multi_tool_context()
+    result = DecisionStage(
+        model_with(lambda _: httpx.Response(200, json=provider_payload(response))),
+        context_with_two_tools.available_tools,
+    ).decide(context_with_two_tools)
+    assert result.decision is not None
+    assert result.decision.tool_name == "get_joinable_team_facts"
+    assert result.decision.tool_arguments == {"activityId": 100123}
+
+
 def test_real_adapter_answer_still_passes_evidence_validation() -> None:
     answer = json.dumps({
         "action": "ANSWER", "final_answer": "订单状态已获取。", "used_evidence": ["order.status"],
@@ -79,6 +126,40 @@ def test_real_adapter_answer_still_passes_evidence_validation() -> None:
         model_with(lambda _: httpx.Response(200, json=provider_payload(answer))), facts_context.available_tools
     ).decide(facts_context)
     assert result.decision is not None and result.decision.action.value == "ANSWER"
+
+
+def test_real_adapter_capability_answer_uses_no_business_evidence() -> None:
+    answer = json.dumps({
+        "action": "ANSWER",
+        "final_answer": "我可以查询订单拼团事实和当前可加入团队。",
+        "used_evidence": [],
+    })
+    result = DecisionStage(
+        model_with(lambda _: httpx.Response(200, json=provider_payload(answer))), context().available_tools
+    ).decide(context())
+    assert result.decision is not None
+    assert result.decision.action.value == "ANSWER"
+    assert result.decision.used_evidence == []
+
+
+@pytest.mark.parametrize(
+    "metadata_path",
+    [
+        "available_tools.get_order_facts.description",
+        "available_tools.get_joinable_team_facts.description",
+    ],
+)
+def test_real_adapter_rejects_capability_metadata_as_business_evidence(metadata_path: str) -> None:
+    answer = json.dumps({
+        "action": "ANSWER",
+        "final_answer": "我可以查询当前能力。",
+        "used_evidence": [metadata_path],
+    })
+    result = DecisionStage(
+        model_with(lambda _: httpx.Response(200, json=provider_payload(answer))), multi_tool_context().available_tools
+    ).decide(multi_tool_context())
+    assert result.decision is None
+    assert result.error_code == "MODEL_EVIDENCE_NOT_AVAILABLE"
 
 
 def test_real_adapter_handoff_is_a_valid_decision() -> None:

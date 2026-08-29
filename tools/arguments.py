@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
 
 from agent.slots import validate_out_trade_no
 
@@ -17,3 +17,11 @@ class OrderFactsArguments(BaseModel):
         if not slot.is_valid:
             raise ValueError(slot.error_code or "OUT_TRADE_NO_INVALID")
         return slot.value
+
+
+class JoinableTeamFactsArguments(BaseModel):
+    """Only model-controllable argument for get_joinable_team_facts."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    activity_id: StrictInt = Field(alias="activityId", gt=0)

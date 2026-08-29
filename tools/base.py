@@ -35,3 +35,9 @@ class MarketClient(Protocol):
     """High-level Java order-facts client boundary used by the business Tool."""
 
     def get_order_facts(self, auth: AuthContext, out_trade_no: str) -> ToolResult: ...
+
+
+class JoinableTeamFactsClient(Protocol):
+    """High-level Java joinable-team-facts boundary used by the business Tool."""
+
+    def get_joinable_team_facts(self, auth: AuthContext, activity_id: int) -> ToolResult: ...

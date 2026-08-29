@@ -106,3 +106,45 @@ def test_sensitive_argument_and_unknown_tool_are_never_rewritten() -> None:
     with pytest.raises(ValidationError):
         OrderFactsArguments.model_validate(normalized["tool_arguments"])
     assert normalize_agent_decision_payload(call_tool(tool_name="refund_order"))["tool_name"] == "refund_order"
+
+
+def test_empty_collection_evidence_is_accepted_but_fabricated_children_are_rejected() -> None:
+    observations = [
+        Observation(
+            tool_name="get_joinable_team_facts",
+            data={"candidate_teams": []},
+            evidence=[Evidence(kind="get_joinable_team_facts.candidate_teams", value="[]", source="test")],
+        )
+    ]
+    accepted = parse_agent_decision({
+        "action": "ANSWER", "final_answer": "本次查询没有返回候选团队。",
+        "used_evidence": ["get_joinable_team_facts.candidate_teams"],
+    })
+    assert validate_evidence(accepted, observations=observations).valid
+
+    for fabricated_path in (
+        "get_joinable_team_facts.candidate_teams.0",
+        "get_joinable_team_facts.candidate_teams.0.team_id",
+        "get_joinable_team_facts.candidate_teams.99.team_id",
+        "get_joinable_team_facts.fake_field",
+        "get_joinable_team_facts.statistics.fake_count",
+        "unknown_tool.candidate_teams",
+    ):
+        fabricated = parse_agent_decision({
+            "action": "ANSWER", "final_answer": "不可验证。", "used_evidence": [fabricated_path],
+        })
+        assert validate_evidence(fabricated, observations=observations).error_code == "MODEL_EVIDENCE_NOT_AVAILABLE"
+
+
+@pytest.mark.parametrize(
+    "metadata_path",
+    [
+        "available_tools.get_order_facts.description",
+        "available_tools.get_joinable_team_facts.description",
+    ],
+)
+def test_capability_metadata_is_not_observation_evidence(metadata_path: str) -> None:
+    decision = parse_agent_decision({
+        "action": "ANSWER", "final_answer": "能力说明。", "used_evidence": [metadata_path],
+    })
+    assert validate_evidence(decision, observations=[]).error_code == "MODEL_EVIDENCE_NOT_AVAILABLE"

@@ -13,7 +13,7 @@ from agent.state import AgentState, AgentStatus, Intent
 from guardrails.auth_context import AuthContext
 from tools.fake_market_client import FakeMarketClient
 from tools.arguments import OrderFactsArguments
-from tools.java_market_client import JavaMarketClient, JavaMarketClientConfig, OrderFactsTool
+from tools.java_market_client import JavaMarketClient, JavaMarketClientConfig, JoinableTeamFactsTool, OrderFactsTool
 from tools.registry import ToolRegistry
 from tools.schemas import Evidence, ToolResult
 
@@ -83,10 +83,13 @@ def test_java_0000_parses_normalized_facts_and_injects_trusted_dev_header() -> N
     assert "reasonCode" not in result.data
 
 
-def test_tool_input_has_no_user_id_and_registry_only_exposes_facts() -> None:
+def test_tool_input_has_no_user_id_and_default_registry_only_exposes_allowed_facts_tools() -> None:
     assert "user_id" not in str(inspect.signature(OrderFactsTool.run))
     assert "auth" in str(inspect.signature(JavaMarketClient.get_order_facts))
-    assert OrderFactsOrchestrator(compatibility_mode=True).registry.allowed_names == ("get_order_facts",)
+    assert "user_id" not in str(inspect.signature(JoinableTeamFactsTool.run))
+    assert OrderFactsOrchestrator(compatibility_mode=True).registry.allowed_names == (
+        "get_order_facts", "get_joinable_team_facts"
+    )
 
 
 @pytest.mark.parametrize(
