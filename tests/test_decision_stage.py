@@ -4,6 +4,7 @@ import json
 import logging
 
 import pytest
+from pydantic import BaseModel
 
 import agent.orchestrator as orchestrator_module
 from agent.orchestrator import OrderFactsOrchestrator
@@ -11,6 +12,7 @@ from agent.state import AgentStatus, Intent, Observation
 from decision.model import FakeDecisionModel
 from decision.schemas import DecisionContext, parse_agent_decision
 from tools.fake_market_client import FakeMarketClient
+from tools.base import RepeatPolicy
 from tools.java_market_client import OrderFactsTool
 from tools.registry import ToolRegistry
 from tools.schemas import Evidence, ToolResult
@@ -66,6 +68,24 @@ def decision_agent(responses: list[object], result: ToolResult | None = None):
         decision_model=model,
     )
     return agent, model, market
+
+
+class SequentialMarketClient:
+    """Test double for separating physical Tool retries from model actions."""
+
+    def __init__(self, results: list[ToolResult]) -> None:
+        self.results = list(results)
+        self.calls: list[tuple[object, str]] = []
+
+    def get_order_facts(self, auth: object, out_trade_no: str) -> ToolResult:
+        self.calls.append((auth, out_trade_no))
+        return self.results.pop(0)
+
+
+def decision_agent_with_tool(responses: list[object], tool: OrderFactsTool):
+    model = FakeDecisionModel(responses)
+    agent = OrderFactsOrchestrator(registry=ToolRegistry([tool]), decision_model=model)
+    return agent, model
 
 
 def test_multi_round_call_tool_observation_answer_and_trace(caplog) -> None:
@@ -183,23 +203,101 @@ def test_answer_with_fabricated_evidence_is_rejected(caplog) -> None:
     assert any(event["stage"] == "MODEL_VALIDATION_ERROR" and event["error_code"] == "MODEL_EVIDENCE_NOT_AVAILABLE" for event in events)
 
 
-def test_duplicate_same_tool_and_arguments_handoffs_without_second_execution() -> None:
-    agent, _, market = decision_agent([call_facts(), call_facts()])
+def test_third_identical_repeat_is_blocked_before_execution(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="group_buy_agent.trace")
+    agent, _, market = decision_agent([call_facts(), call_facts(), call_facts()])
     state = agent.handle_message("loop-duplicate", "trusted-user", "查询")
+    assert state.status is AgentStatus.HANDOFF
+    assert state.tool_call_count == 2 and len(market.calls) == 2
+    assert len(state.context.tool_call_history) == 2
+    events = [json.loads(record.message) for record in caplog.records]
+    assert any(
+        event["stage"] == "TOOL_REPEAT_BLOCKED"
+        and event["tool_name"] == "get_order_facts"
+        and event["same_call_count"] == 2
+        and event["allowed_same_call_count"] == 2
+        for event in events
+    )
+
+
+def test_tool_timeout_keeps_tool_retry_counters_separate_from_model() -> None:
+    timeout = ToolResult.infrastructure_failure("TOOL_TIMEOUT", "", retryable=True, source="fake_market")
+    market = SequentialMarketClient([timeout, facts_result()])
+    agent, model = decision_agent_with_tool([call_facts(), answer()], OrderFactsTool(market))
+    state = agent.handle_message("loop-timeout", "trusted-user", "查询")
+    assert state.status is AgentStatus.FINISHED
+    assert state.tool_call_count == 2 and state.retry_count == 1
+    assert state.model_call_count == 2 and state.model_retry_count == 0
+    assert len(market.calls) == 2
+    assert len(state.observations) == 1
+    assert len(state.context.tool_call_history) == 1
+    assert len(model.contexts) == 2
+
+
+def test_second_identical_repeat_is_permitted_and_produces_two_observations() -> None:
+    market = SequentialMarketClient([facts_result(), facts_result()])
+    agent, model = decision_agent_with_tool(
+        [call_facts(), call_facts(), answer()], OrderFactsTool(market)
+    )
+    state = agent.handle_message("loop-repeat-allowed", "trusted-user", "查询")
+
+    assert state.status is AgentStatus.FINISHED
+    assert state.tool_call_count == 2 and len(market.calls) == 2
+    assert len(state.context.tool_call_history) == 2
+    assert len(state.observations) == 2
+    assert len(model.contexts[2].observations) == 2
+
+
+def test_non_repeatable_tool_blocks_second_identical_model_action() -> None:
+    market = SequentialMarketClient([facts_result(), facts_result()])
+    tool = OrderFactsTool(market)
+    tool.repeat_policy = RepeatPolicy(repeatable=False, max_same_call=2)
+    agent, _ = decision_agent_with_tool([call_facts(), call_facts()], tool)
+    state = agent.handle_message("loop-non-repeatable", "trusted-user", "查询")
+
     assert state.status is AgentStatus.HANDOFF
     assert state.tool_call_count == 1 and len(market.calls) == 1
     assert len(state.context.tool_call_history) == 1
 
 
-def test_tool_timeout_keeps_tool_retry_counters_separate_from_model() -> None:
-    timeout = ToolResult.infrastructure_failure("TOOL_TIMEOUT", "", retryable=True, source="fake_market")
-    agent, _, market = decision_agent([call_facts()], timeout)
-    state = agent.handle_message("loop-timeout", "trusted-user", "查询")
+def test_same_tool_with_different_validated_arguments_is_not_a_repeat() -> None:
+    market = SequentialMarketClient([facts_result(), facts_result()])
+    agent, _ = decision_agent_with_tool(
+        [call_facts({"outTradeNo": "202608240001"}), call_facts({"outTradeNo": "202608240002"}), answer()],
+        OrderFactsTool(market),
+    )
+    state = agent.handle_message("loop-different-arguments", "trusted-user", "查询")
+
+    assert state.status is AgentStatus.FINISHED
+    assert state.tool_call_count == 2
+    assert [call[1] for call in market.calls] == ["202608240001", "202608240002"]
+    assert len(set(state.context.tool_call_history)) == 2
+
+
+class OrderedArguments(BaseModel):
+    first: str
+    second: int
+
+
+def test_tool_call_signature_is_canonical_after_validation_not_raw_key_order() -> None:
+    first = OrderedArguments.model_validate({"second": 2, "first": "one"})
+    second = OrderedArguments.model_validate({"first": "one", "second": 2})
+    assert OrderFactsOrchestrator._tool_call_signature("test_tool", first) == (
+        OrderFactsOrchestrator._tool_call_signature("test_tool", second)
+    )
+
+
+def test_multiple_repeat_observations_do_not_accept_fabricated_evidence() -> None:
+    market = SequentialMarketClient([facts_result(), facts_result()])
+    agent, model = decision_agent_with_tool(
+        [call_facts(), call_facts(), answer(["get_order_facts.payment.status"])],
+        OrderFactsTool(market),
+    )
+    state = agent.handle_message("loop-repeat-evidence", "trusted-user", "查询")
+
     assert state.status is AgentStatus.HANDOFF
-    assert state.tool_call_count == 2 and state.retry_count == 1
-    assert state.model_call_count == 1 and state.model_retry_count == 0
-    assert len(market.calls) == 2
-    assert state.observations == []
+    assert state.tool_call_count == 2 and len(state.observations) == 2
+    assert len(model.contexts[2].observations) == 2
 
 
 def test_decision_context_aggregates_multiple_observations() -> None:

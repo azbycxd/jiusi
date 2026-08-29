@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, StrictStr, ValidationError
 
 from agent.state import AgentState
 from tools.arguments import OrderFactsArguments
-from tools.base import AgentTool
+from tools.base import AgentTool, RepeatPolicy
 from tools.fake_market_client import FakeMarketClient
 from tools.java_market_client import OrderFactsTool
 from tools.registry import ToolRegistry
@@ -24,10 +24,16 @@ def test_order_facts_tool_self_describes_its_contract() -> None:
     assert tool.name == "get_order_facts"
     assert tool.description
     assert tool.arguments_schema is OrderFactsArguments
+    assert tool.repeat_policy == RepeatPolicy(repeatable=True, max_same_call=2)
     schema = tool.arguments_schema.model_json_schema(by_alias=True)
     assert schema["required"] == ["outTradeNo"]
     assert schema["properties"]["outTradeNo"]["type"] == "string"
     assert schema["additionalProperties"] is False
+
+
+def test_repeat_policy_requires_at_least_one_allowed_identical_call() -> None:
+    with pytest.raises(ValidationError):
+        RepeatPolicy(max_same_call=0)
 
 
 def test_registry_describes_tools_from_metadata_without_business_branches() -> None:
@@ -95,6 +101,7 @@ class DemoTool:
     name = "test_tool"
     description = "Test-only self-described tool."
     arguments_schema = DemoArguments
+    repeat_policy = RepeatPolicy(repeatable=False, max_same_call=1)
 
     def run(self, state: AgentState, arguments: DemoArguments) -> ToolResult:
         return ToolResult(success=True, data={"value": arguments.value}, source="test_tool")
@@ -109,3 +116,4 @@ def test_registry_is_generic_for_a_second_self_described_test_tool() -> None:
     assert isinstance(arguments, DemoArguments)
     assert registry.call("test_tool", state, arguments).data == {"value": "ok"}
     assert registry.available_tools[0]["parameters_schema"]["required"] == ["value"]
+    assert registry.repeat_policy("test_tool") == DemoTool.repeat_policy

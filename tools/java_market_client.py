@@ -11,10 +11,10 @@ from agent.slots import validate_out_trade_no
 from agent.state import AgentState
 from config.environment import load_project_env
 from guardrails.auth_context import AuthContext
+from tools.base import MarketClient, RepeatPolicy
 from tools.arguments import OrderFactsArguments
 from tools.errors import ToolConnectionError, ToolTimeoutError, to_tool_result
 from tools.facts import OrderFacts
-from tools.base import MarketClient
 from tools.schemas import Evidence, ToolResult
 
 
@@ -145,6 +145,7 @@ class OrderFactsTool:
     name = "get_order_facts"
     description = "Read trusted order, team, activity, and reference facts for an external order number."
     arguments_schema = OrderFactsArguments
+    repeat_policy = RepeatPolicy(repeatable=True, max_same_call=2)
 
     def __init__(self, client: MarketClient | None = None) -> None:
         self._client = client or JavaMarketClient()

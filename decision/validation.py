@@ -28,12 +28,12 @@ def canonicalize_evidence_paths(
         if path in available_paths:
             return path
         legacy_path = path.removeprefix("facts.")
-        matches = [
+        matches = {
             f"{observation.tool_name}.{legacy_path}"
             for observation in observations
             if f"{observation.tool_name}.{legacy_path}" in available_paths
-        ]
-        return matches[0] if len(matches) == 1 else path
+        }
+        return next(iter(matches)) if len(matches) == 1 else path
 
     return decision.model_copy(
         update={"used_evidence": [canonicalize(path) for path in decision.used_evidence]}

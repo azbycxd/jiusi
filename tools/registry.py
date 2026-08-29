@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ValidationError
 
 from agent.state import AgentState
-from tools.base import AgentTool
+from tools.base import AgentTool, RepeatPolicy
 from tools.schemas import ToolResult
 
 
@@ -20,6 +20,11 @@ class ToolRegistry:
 
     def get(self, name: str) -> AgentTool | None:
         return self._tools.get(name)
+
+    def repeat_policy(self, name: str) -> RepeatPolicy | None:
+        """Return a Tool-owned repeat contract without knowing its business semantics."""
+        tool = self.get(name)
+        return tool.repeat_policy if tool is not None else None
 
     @property
     def allowed_names(self) -> tuple[str, ...]:

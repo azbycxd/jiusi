@@ -1,10 +1,22 @@
 from typing import Protocol, runtime_checkable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent.state import AgentState
 from guardrails.auth_context import AuthContext
 from tools.schemas import ToolResult
+
+
+class RepeatPolicy(BaseModel):
+    """Per-Tool limit for identical model-requested calls within one task."""
+
+    repeatable: bool = False
+    max_same_call: int = Field(default=1, ge=1)
+
+    @property
+    def allowed_same_call_count(self) -> int:
+        """Non-repeatable Tools always permit exactly their initial call."""
+        return self.max_same_call if self.repeatable else 1
 
 
 @runtime_checkable
@@ -14,6 +26,7 @@ class AgentTool(Protocol):
     name: str
     description: str
     arguments_schema: type[BaseModel]
+    repeat_policy: RepeatPolicy
 
     def run(self, state: AgentState, arguments: BaseModel) -> ToolResult: ...
 

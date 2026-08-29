@@ -126,13 +126,21 @@ class OrderFactsOrchestrator:
             if arguments is None:
                 TerminationPolicy.handoff(state, "模型请求的工具或参数不符合安全策略，已转人工客服处理。")
                 return self._save(state, trace)
-            signature = f"{decision.tool_name}:{json.dumps(arguments.model_dump(by_alias=True), sort_keys=True, ensure_ascii=True)}"
-            if signature in state.context.tool_call_history:
+            signature = self._tool_call_signature(decision.tool_name, arguments)
+            repeat_policy = self.registry.repeat_policy(decision.tool_name)
+            if repeat_policy is None:
+                TerminationPolicy.handoff(state, "当前工具缺少重复调用安全契约，已转人工客服处理。")
+                return self._save(state, trace)
+            same_call_count = state.context.tool_call_history.count(signature)
+            allowed_same_call_count = repeat_policy.allowed_same_call_count
+            if same_call_count >= allowed_same_call_count:
                 self._trace(
-                    trace, state, stage="MODEL_VALIDATION_ERROR", action="duplicate_tool_call",
-                    error_code="DUPLICATE_TOOL_CALL",
+                    trace, state, stage="TOOL_REPEAT_BLOCKED", action="block_repeat",
+                    tool_name=decision.tool_name, error_code="TOOL_REPEAT_LIMIT",
+                    same_call_count=same_call_count,
+                    allowed_same_call_count=allowed_same_call_count,
                 )
-                TerminationPolicy.handoff(state, "重复工具调用不会提供新事实，已转人工客服处理。")
+                TerminationPolicy.handoff(state, "相同工具调用已达到安全上限，已转人工客服处理。")
                 return self._save(state, trace)
             if TerminationPolicy.enforce(state):
                 return self._save(state, trace)
@@ -146,6 +154,17 @@ class OrderFactsOrchestrator:
 
         TerminationPolicy.handoff(state, "Agent 迭代次数已达上限，已转人工客服处理。")
         return self._save(state, trace)
+
+    @staticmethod
+    def _tool_call_signature(tool_name: str, validated_arguments: BaseModel) -> str:
+        """Stable identity for one model-requested Tool action, excluding trusted state."""
+        arguments_json = json.dumps(
+            validated_arguments.model_dump(by_alias=True, mode="json"),
+            sort_keys=True,
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        return f"{tool_name}:{arguments_json}"
 
     def _ask_model(self, state: AgentState, trace: TraceRecorder) -> DecisionStageResult:
         assert self._decision_stage is not None
@@ -262,6 +281,8 @@ class OrderFactsOrchestrator:
         tool_name: str | None = None,
         tool_success: bool | None = None,
         error_code: str | None = None,
+        same_call_count: int | None = None,
+        allowed_same_call_count: int | None = None,
         started_at: float | None = None,
         telemetry=None,
     ) -> None:
@@ -272,6 +293,8 @@ class OrderFactsOrchestrator:
             tool_name=tool_name,
             tool_success=tool_success,
             error_code=error_code,
+            same_call_count=same_call_count,
+            allowed_same_call_count=allowed_same_call_count,
             started_at=started_at,
             iteration_count=state.iteration_count,
             tool_call_count=state.tool_call_count,
