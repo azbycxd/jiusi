@@ -3,10 +3,12 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from agent.state import Observation
 from decision.normalization import normalize_agent_decision_payload
 from decision.schemas import AnswerDecision, CallToolDecision, HandoffDecision, parse_agent_decision
 from decision.validation import canonicalize_evidence_paths, validate_evidence
 from tools.arguments import normalize_order_facts_arguments
+from tools.schemas import Evidence
 
 
 def call_tool(**overrides) -> dict:
@@ -76,18 +78,25 @@ def test_answer_and_call_tool_string_missing_information_are_not_normalized() ->
 
 
 def test_answer_facts_prefix_is_canonicalized_and_unknown_path_is_rejected() -> None:
+    observations = [
+        Observation(
+            tool_name="get_order_facts",
+            data={"order": {"status": "CLOSE"}},
+            evidence=[Evidence(kind="get_order_facts.order.status", value="CLOSE", source="test")],
+        )
+    ]
     accepted = parse_agent_decision(
         {"action": "ANSWER", "final_answer": "已获取", "used_evidence": ["facts.order.status"]}
     )
-    accepted = canonicalize_evidence_paths(accepted)
-    assert accepted.used_evidence == ["order.status"]
-    assert validate_evidence(accepted, facts={"order": {"status": "CLOSE"}}).valid
+    accepted = canonicalize_evidence_paths(accepted, observations=observations)
+    assert accepted.used_evidence == ["get_order_facts.order.status"]
+    assert validate_evidence(accepted, observations=observations).valid
 
     rejected = parse_agent_decision(
         {"action": "ANSWER", "final_answer": "已获取", "used_evidence": ["facts.payment.failed"]}
     )
-    rejected = canonicalize_evidence_paths(rejected)
-    assert validate_evidence(rejected, facts={"order": {"status": "CLOSE"}}).error_code == "MODEL_EVIDENCE_NOT_AVAILABLE"
+    rejected = canonicalize_evidence_paths(rejected, observations=observations)
+    assert validate_evidence(rejected, observations=observations).error_code == "MODEL_EVIDENCE_NOT_AVAILABLE"
 
 
 def test_sensitive_argument_and_unknown_tool_are_never_rewritten() -> None:

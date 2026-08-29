@@ -35,8 +35,7 @@ def summarise(state) -> dict:
         "tool_call_count": state.tool_call_count,
         "retry_count": state.retry_count,
         "diagnosis_code": state.diagnosis_code,
-        "order_facts": state.order_facts,
-        "evidence": state.evidence,
+        "observations": [item.model_dump(mode="json") for item in state.observations],
         "tool_results": [result.model_dump() for result in state.tool_results],
     }
 

@@ -103,7 +103,7 @@ class RealLLMDecisionModel:
         visible_context = {
             "user_query": context.user_query,
             "available_tools": [tool.model_dump(mode="json") for tool in context.available_tools],
-            "facts": context.facts,
+            "observations": [item.model_dump(mode="json") for item in context.observations],
             "evidence": context.evidence,
         }
         return {

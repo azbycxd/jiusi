@@ -82,8 +82,7 @@ def run_case(session_id: str, user_query: str, trace: SafeTraceCapture) -> dict[
         "model_retry_count": state.model_retry_count,
         "decisions": recorder.decisions,
         "tool_call_history": state.context.tool_call_history,
-        "facts": state.context.order_facts,
-        "evidence": state.context.evidence,
+        "observations": [item.model_dump(mode="json") for item in state.context.observations],
         "tool_results": [
             {"success": result.success, "error_code": result.error_code, "source": result.source}
             for result in state.context.tool_results

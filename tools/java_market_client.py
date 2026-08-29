@@ -118,11 +118,11 @@ class JavaMarketClient:
         evidence = [
             Evidence(kind="order.status", value=facts.order.status, source=self.source),
             Evidence(kind="team.status", value=facts.team.status, source=self.source),
-            Evidence(kind="team.targetCount", value=str(facts.team.target_count), source=self.source),
-            Evidence(kind="team.completeCount", value=str(facts.team.complete_count), source=self.source),
+            Evidence(kind="team.target_count", value=str(facts.team.target_count), source=self.source),
+            Evidence(kind="team.complete_count", value=str(facts.team.complete_count), source=self.source),
             Evidence(kind="activity.status", value=facts.activity.status, source=self.source),
         ]
-        return ToolResult(success=True, message="订单事实获取成功", data={"facts": facts_data}, evidence=evidence, source=self.source)
+        return ToolResult(success=True, message="订单事实获取成功", data=facts_data, evidence=evidence, source=self.source)
 
     def _error_for_java_code(self, code: str) -> ToolResult:
         mapping: dict[str, tuple[bool, str]] = {

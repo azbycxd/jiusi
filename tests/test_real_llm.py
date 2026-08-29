@@ -7,21 +7,29 @@ import httpx
 import pytest
 
 from agent.orchestrator import OrderFactsOrchestrator
-from agent.state import AgentStatus
+from agent.state import AgentStatus, Observation
 from decision.real_llm import RealLLMConfig, RealLLMDecisionModel
 from decision.schemas import DecisionContext
 from decision.stage import DecisionStage
 from tools.fake_market_client import FakeMarketClient
 from tools.java_market_client import OrderFactsTool
 from tools.registry import ToolRegistry
+from tools.schemas import Evidence
 
 
-def context(*, facts: dict | None = None) -> DecisionContext:
+def context(*, observations: list[Observation] | None = None) -> DecisionContext:
     return DecisionContext(
         user_query="为什么订单还没有拼团成功？",
-        facts=facts or {},
-        evidence=[],
+        observations=observations or [],
         available_tools=ToolRegistry([OrderFactsTool(FakeMarketClient({}))]).available_tools,
+    )
+
+
+def order_observation() -> Observation:
+    return Observation(
+        tool_name="get_order_facts",
+        data={"order": {"status": "CLOSE"}},
+        evidence=[Evidence(kind="get_order_facts.order.status", value="CLOSE", source="test")],
     )
 
 
@@ -49,7 +57,7 @@ def test_real_adapter_converts_legal_call_tool_response_and_uses_safe_payload() 
         assert "llm-secret-value" not in serialized
         assert "trusted-user" not in serialized
         visible = json.loads(body["messages"][1]["content"])
-        assert set(visible) == {"user_query", "available_tools", "facts", "evidence"}
+        assert set(visible) == {"user_query", "available_tools", "observations", "evidence"}
         assert visible["available_tools"][0]["parameters_schema"]["required"] == ["outTradeNo"]
         return httpx.Response(200, json=provider_payload(json.dumps({
             "action": "CALL_TOOL", "tool_name": "get_order_facts",
@@ -66,7 +74,7 @@ def test_real_adapter_answer_still_passes_evidence_validation() -> None:
     answer = json.dumps({
         "action": "ANSWER", "final_answer": "订单状态已获取。", "used_evidence": ["order.status"],
     })
-    facts_context = context(facts={"order": {"status": "CLOSE"}})
+    facts_context = context(observations=[order_observation()])
     result = DecisionStage(
         model_with(lambda _: httpx.Response(200, json=provider_payload(answer))), facts_context.available_tools
     ).decide(facts_context)

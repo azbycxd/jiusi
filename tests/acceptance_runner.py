@@ -15,12 +15,12 @@ def main() -> None:
     result = ToolResult(
         success=True,
         message="facts",
-        data={"facts": {
+        data={
             "order": {"status": "CLOSE"},
             "team": {"status": "PROGRESS", "target_count": 3, "lock_count": 0, "complete_count": 0, "valid_end_time": None},
             "activity": {"status": "EFFECTIVE"},
             "references": {"team_id": "team-1", "activity_id": 100123},
-        }},
+        },
         evidence=[Evidence(kind="order.status", value="CLOSE", source="fake_market")],
         source="fake_market",
     )
@@ -32,7 +32,7 @@ def main() -> None:
     print(json.dumps({
         "status": state.status.value,
         "answer": state.final_answer,
-        "facts": state.order_facts,
+        "observations": [item.model_dump(mode="json") for item in state.observations],
         "tool_calls": state.tool_call_count,
     }, ensure_ascii=True))
 

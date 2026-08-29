@@ -3,9 +3,9 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from tools.schemas import ToolResult
+from tools.schemas import Evidence, ToolResult
 
 
 class AgentStatus(str, Enum):
@@ -27,6 +27,49 @@ class CapabilityState(BaseModel):
     allowed_tools: tuple[str, ...] = ("get_order_facts",)
 
 
+def _data_paths(value: object, prefix: str = "") -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {prefix: str(value)} if prefix else {}
+    paths: dict[str, str] = {}
+    for key, child in value.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        paths.update(_data_paths(child, path))
+    return paths
+
+
+class Observation(BaseModel):
+    """Validated, model-visible result of one successful Tool invocation."""
+
+    tool_name: str
+    data: dict[str, Any]
+    evidence: list[Evidence]
+
+    @model_validator(mode="after")
+    def evidence_must_describe_this_observation(self) -> "Observation":
+        data_paths = _data_paths(self.data)
+        prefix = f"{self.tool_name}."
+        for item in self.evidence:
+            if not item.kind.startswith(prefix):
+                raise ValueError("Observation evidence must use the producing tool prefix")
+            data_path = item.kind.removeprefix(prefix)
+            if data_path not in data_paths or data_paths[data_path] != item.value:
+                raise ValueError("Observation evidence must match normalized observation data")
+        return self
+
+    @classmethod
+    def from_successful_tool_result(cls, tool_name: str, result: ToolResult) -> "Observation":
+        if not result.success:
+            raise ValueError("Failed ToolResult cannot produce an Observation")
+        return cls(
+            tool_name=tool_name,
+            data=result.data,
+            evidence=[
+                item.model_copy(update={"kind": f"{tool_name}.{item.kind}"})
+                for item in result.evidence
+            ],
+        )
+
+
 class ContextState(BaseModel):
     """Information visible to the next controlled reasoning step for this task."""
 
@@ -37,8 +80,7 @@ class ContextState(BaseModel):
     activity_id: str | None = None
     missing_fields: list[str] = Field(default_factory=list)
     tool_results: list[ToolResult] = Field(default_factory=list)
-    evidence: list[dict[str, Any]] = Field(default_factory=list)
-    order_facts: dict[str, Any] | None = None
+    observations: list[Observation] = Field(default_factory=list)
     model_decision: dict[str, Any] | None = None
     tool_call_history: list[str] = Field(default_factory=list)
     # Reserved for a later diagnosis stage. Phase 2B facts retrieval never sets it.
@@ -89,9 +131,7 @@ class AgentState(BaseModel):
     @property
     def tool_results(self) -> list[ToolResult]: return self.context.tool_results
     @property
-    def evidence(self) -> list[dict[str, Any]]: return self.context.evidence
-    @property
-    def order_facts(self) -> dict[str, Any] | None: return self.context.order_facts
+    def observations(self) -> list[Observation]: return self.context.observations
     @property
     def diagnosis_code(self) -> str | None: return self.context.diagnosis_code
     @property

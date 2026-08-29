@@ -5,7 +5,7 @@ import time
 from dataclasses import replace
 
 from agent.router import RoutingResult, route
-from agent.state import AgentState, AgentStatus
+from agent.state import AgentState, AgentStatus, Observation
 from agent.termination import TerminationPolicy
 from decision.model import DecisionModel
 from decision.schemas import AgentAction
@@ -142,8 +142,7 @@ class OrderFactsOrchestrator:
         assert self._decision_stage is not None
         context = self._decision_stage.build_context(
             user_query=state.user_query,
-            facts=state.order_facts or {},
-            evidence=state.evidence,
+            observations=state.observations,
         )
         for _ in range(state.control.max_model_retries + 1):
             state.control.model_call_count += 1
@@ -194,7 +193,7 @@ class OrderFactsOrchestrator:
                 result = self.registry.call(tool_name, state)
             except Exception as error:
                 result = to_tool_result(error, source="orchestrator")
-            self._apply_tool_result(state, result)
+            self._apply_tool_result(state, tool_name, result)
             self._trace(
                 trace,
                 state,
@@ -233,16 +232,13 @@ class OrderFactsOrchestrator:
             state.context.out_trade_no = None
 
     @staticmethod
-    def _apply_tool_result(state: AgentState, result: ToolResult) -> None:
+    def _apply_tool_result(state: AgentState, tool_name: str, result: ToolResult) -> None:
         state.context.tool_results.append(result)
-        state.context.evidence.extend(item.model_dump() for item in result.evidence)
         if not result.success:
             return
-        facts = result.data.get("facts")
-        if not isinstance(facts, dict):
-            return
-        state.context.order_facts = facts
-        references = facts.get("references")
+        observation = Observation.from_successful_tool_result(tool_name, result)
+        state.context.observations.append(observation)
+        references = observation.data.get("references")
         if isinstance(references, dict):
             state.context.team_id = str(references["team_id"]) if references.get("team_id") is not None else None
             state.context.activity_id = str(references["activity_id"]) if references.get("activity_id") is not None else None

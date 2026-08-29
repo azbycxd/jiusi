@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from decision.errors import ModelAdapterError
 from decision.model import DecisionModel
 from decision.normalization import normalize_agent_decision_payload
+from agent.state import Observation
 from decision.schemas import AgentDecision, AvailableTool, DecisionContext, parse_agent_decision
 from decision.telemetry import ModelTelemetry
 from decision.validation import canonicalize_evidence_paths, validate_evidence
@@ -29,11 +30,10 @@ class DecisionStage:
         self._model = model
         self._available_tools = available_tools
 
-    def build_context(self, *, user_query: str, facts: dict, evidence: list[dict]) -> DecisionContext:
+    def build_context(self, *, user_query: str, observations: list[Observation]) -> DecisionContext:
         return DecisionContext(
             user_query=user_query,
-            facts=facts,
-            evidence=evidence,
+            observations=observations,
             available_tools=tuple(AvailableTool.model_validate(tool) for tool in self._available_tools),
         )
 
@@ -49,8 +49,8 @@ class DecisionStage:
             decision = parse_agent_decision(normalize_agent_decision_payload(raw_decision))
         except ValidationError:
             return DecisionStageResult(error_code="MODEL_CONTRACT_MISMATCH", retryable=True, telemetry=telemetry)
-        decision = canonicalize_evidence_paths(decision)
-        validation = validate_evidence(decision, facts=context.facts)
+        decision = canonicalize_evidence_paths(decision, observations=context.observations)
+        validation = validate_evidence(decision, observations=context.observations)
         if not validation.valid:
             return DecisionStageResult(error_code=validation.error_code, telemetry=telemetry)
         return DecisionStageResult(decision=decision, telemetry=telemetry)

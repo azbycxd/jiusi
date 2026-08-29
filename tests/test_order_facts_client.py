@@ -46,12 +46,12 @@ def facts_result() -> ToolResult:
     return ToolResult(
         success=True,
         message="事实",
-        data={"facts": {
+        data={
             "order": {"status": "CLOSE"},
             "team": {"status": "PROGRESS", "target_count": 3, "lock_count": 0, "complete_count": 0, "valid_end_time": None},
             "activity": {"status": "EFFECTIVE"},
             "references": {"team_id": "team-1", "activity_id": 100123},
-        }},
+        },
         evidence=[Evidence(kind="order.status", value="CLOSE", source="fake_market")],
         source="fake_market",
     )
@@ -76,8 +76,8 @@ def test_java_0000_parses_normalized_facts_and_injects_trusted_dev_header() -> N
     result = market_client(handler).get_order_facts(AuthContext(authenticated_user_id="trusted-user"), " A-2026.1 ")
     assert result.success is True
     assert result.source == "java_market"
-    assert result.data["facts"]["team"]["target_count"] == 3
-    assert result.data["facts"]["references"]["activity_id"] == 100123
+    assert result.data["team"]["target_count"] == 3
+    assert result.data["references"]["activity_id"] == 100123
     assert {item.kind for item in result.evidence} >= {"order.status", "team.status", "activity.status"}
     assert "reasonCode" not in result.data
 
@@ -129,18 +129,20 @@ def test_transport_and_contract_failures_are_stable_tool_results() -> None:
     assert (unexpected_status.error_code, unexpected_status.retryable) == ("HTTP_UNEXPECTED_STATUS", True)
 
 
-def test_facts_enter_context_without_generating_diagnosis() -> None:
+def test_successful_facts_become_one_observation_without_generating_diagnosis() -> None:
     agent, fake = facts_agent({"202608240001": facts_result()})
     state = agent.handle_message("facts-context", "trusted-user", "查询拼团订单 202608240001")
     assert state.status is AgentStatus.FINISHED
     assert state.final_answer == "FACTS_RETRIEVED"
     assert state.intent is Intent.ORDER_FACTS
-    assert state.order_facts is not None
-    assert state.order_facts["order"]["status"] == "CLOSE"
+    assert len(state.observations) == 1
+    assert state.observations[0].tool_name == "get_order_facts"
+    assert state.observations[0].data["order"]["status"] == "CLOSE"
+    assert state.observations[0].evidence[0].kind == "get_order_facts.order.status"
     assert state.team_id == "team-1"
     assert state.activity_id == "100123"
     assert len(state.tool_results) == 1 and state.tool_results[0].success
-    assert state.evidence and state.diagnosis_code is None
+    assert state.observations[0].evidence and state.diagnosis_code is None
     assert fake.calls[0][0].authenticated_user_id == "trusted-user"
 
 

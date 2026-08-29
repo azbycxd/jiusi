@@ -6,7 +6,7 @@ import logging
 import pytest
 
 from agent.orchestrator import OrderFactsOrchestrator
-from agent.state import AgentStatus
+from agent.state import AgentStatus, Observation
 from decision.model import FakeDecisionModel
 from decision.schemas import DecisionContext, parse_agent_decision
 from tools.fake_market_client import FakeMarketClient
@@ -19,13 +19,19 @@ def facts_result() -> ToolResult:
     return ToolResult(
         success=True,
         message="facts",
-        data={"facts": {
+        data={
             "order": {"status": "CLOSE"},
             "team": {"status": "PROGRESS", "target_count": 3, "lock_count": 0, "complete_count": 0, "valid_end_time": None},
             "activity": {"status": "EFFECTIVE"},
             "references": {"team_id": "team-1", "activity_id": 100123},
-        }},
-        evidence=[Evidence(kind="order.status", value="CLOSE", source="fake_market")],
+        },
+        evidence=[
+            Evidence(kind="order.status", value="CLOSE", source="fake_market"),
+            Evidence(kind="team.status", value="PROGRESS", source="fake_market"),
+            Evidence(kind="team.target_count", value="3", source="fake_market"),
+            Evidence(kind="team.complete_count", value="0", source="fake_market"),
+            Evidence(kind="activity.status", value="EFFECTIVE", source="fake_market"),
+        ],
         source="fake_market",
     )
 
@@ -42,7 +48,12 @@ def answer(evidence: list[str] | None = None) -> dict:
     return {
         "action": "ANSWER",
         "final_answer": "基于当前已获取的事实给出可验证答复。",
-        "used_evidence": evidence if evidence is not None else ["order.status", "team.status", "team.complete_count", "team.target_count"],
+        "used_evidence": evidence if evidence is not None else [
+            "get_order_facts.order.status",
+            "get_order_facts.team.status",
+            "get_order_facts.team.complete_count",
+            "get_order_facts.team.target_count",
+        ],
     }
 
 
@@ -64,10 +75,12 @@ def test_multi_round_call_tool_observation_answer_and_trace(caplog) -> None:
     assert state.final_answer == answer()["final_answer"]
     assert state.tool_call_count == 1 and state.model_call_count == 2
     assert len(market.calls) == 1
-    assert state.order_facts is not None and state.evidence
+    assert len(state.observations) == 1
+    assert state.observations[0].tool_name == "get_order_facts"
+    assert state.observations[0].data["team"]["complete_count"] == 0
     assert len(model.contexts) == 2
-    assert model.contexts[0].facts == {}
-    assert model.contexts[1].facts["team"]["complete_count"] == 0
+    assert model.contexts[0].observations == []
+    assert model.contexts[1].observations[0].data["team"]["complete_count"] == 0
     assert model.contexts[1].evidence
     assert "authenticated_user_id" not in model.contexts[0].model_dump()
     assert model.contexts[0].available_tools[0].parameters_schema["required"] == ["outTradeNo"]
@@ -82,8 +95,8 @@ def test_first_decision_answer_needs_no_tool_or_facts() -> None:
     state = agent.handle_message("loop-answer", "trusted-user", "你能做什么？")
     assert state.status is AgentStatus.FINISHED
     assert state.tool_call_count == 0 and market.calls == []
-    assert state.order_facts is None
-    assert model.contexts[0].facts == {}
+    assert state.observations == []
+    assert model.contexts[0].observations == []
 
 
 def test_unallowed_refund_tool_is_rejected_without_execution() -> None:
@@ -137,6 +150,29 @@ def test_tool_timeout_keeps_tool_retry_counters_separate_from_model() -> None:
     assert state.tool_call_count == 2 and state.retry_count == 1
     assert state.model_call_count == 1 and state.model_retry_count == 0
     assert len(market.calls) == 2
+    assert state.observations == []
+
+
+def test_decision_context_aggregates_multiple_observations() -> None:
+    first = Observation(
+        tool_name="get_order_facts",
+        data={"order": {"status": "CLOSE"}},
+        evidence=[Evidence(kind="get_order_facts.order.status", value="CLOSE", source="test")],
+    )
+    second = Observation(
+        tool_name="future_tool",
+        data={"policy": {"status": "EFFECTIVE"}},
+        evidence=[Evidence(kind="future_tool.policy.status", value="EFFECTIVE", source="test")],
+    )
+    agent, model, _ = decision_agent([answer(evidence=[])])
+    context = agent._decision_stage.build_context(  # type: ignore[union-attr]
+        user_query="测试多个 Observation", observations=[first, second]
+    )
+    assert [item.tool_name for item in context.observations] == ["get_order_facts", "future_tool"]
+    assert [item["kind"] for item in context.evidence] == [
+        "get_order_facts.order.status", "future_tool.policy.status"
+    ]
+    assert model.contexts == []
 
 
 def test_malformed_model_schema_retries_then_answers() -> None:
@@ -201,7 +237,7 @@ def test_agent_decision_and_context_are_strict() -> None:
     else:
         raise AssertionError("ANSWER with tool request must be rejected")
     try:
-        DecisionContext.model_validate({"user_query": "q", "facts": {}, "evidence": [], "available_tools": [], "authenticated_user_id": "forbidden"})
+        DecisionContext.model_validate({"user_query": "q", "observations": [], "available_tools": [], "authenticated_user_id": "forbidden"})
     except Exception:
         pass
     else:

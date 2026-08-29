@@ -5,6 +5,8 @@ from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
+from agent.state import Observation
+
 
 class AgentAction(str, Enum):
     CALL_TOOL = "CALL_TOOL"
@@ -26,9 +28,17 @@ class DecisionContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     user_query: str
-    facts: dict[str, Any]
-    evidence: list[dict[str, Any]]
+    observations: list[Observation] = Field(default_factory=list)
     available_tools: tuple[AvailableTool, ...]
+
+    @property
+    def evidence(self) -> list[dict[str, Any]]:
+        """Evidence is derived from observations; it is never an independent State source."""
+        return [
+            item.model_dump(mode="json")
+            for observation in self.observations
+            for item in observation.evidence
+        ]
 
 
 class CallToolDecision(BaseModel):
