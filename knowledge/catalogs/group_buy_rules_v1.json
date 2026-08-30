@@ -1,0 +1,309 @@
+{
+  "catalog": "group_buy_rules",
+  "version": "v1",
+  "generated_from": "group-buy-market-jiusi",
+  "review_date": "2026-08-30",
+  "entry_count": 15,
+  "entries": [
+    {
+      "knowledge_id": "group_buy_basic_flow",
+      "title": "拼团基本流程",
+      "category": "flow",
+      "content": "当前项目实现体现的基本流程为：用户先锁定拼团订单，支付结算后更新团队完成支付人数；达到团队目标人数时团队完成。超时未支付订单存在定时退单处理。具体订单处于哪个环节需要查询实时订单事实。",
+      "source_type": "domain_flow",
+      "source_level": "LEVEL_3",
+      "source_files": [
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/service/lock/TradeLockOrderService.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/service/settlement/TradeSettlementOrderService.java",
+        "group-buy-market-trigger/src/main/java/cn/bugstack/trigger/job/TimeoutRefundJob.java"
+      ],
+      "source_symbols": [
+        "TradeLockOrderService.lockMarketPayOrder",
+        "TradeSettlementOrderService.settlementMarketPayOrder",
+        "TimeoutRefundJob.exec"
+      ],
+      "version": "v1",
+      "tags": ["拼团", "流程", "锁单", "支付", "超时"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_start_or_join",
+      "title": "开团与参团的区别",
+      "category": "team_rule",
+      "content": "锁定拼团订单时，没有指定团队会创建新团队；指定团队时会尝试加入已有团队。能否成功加入仍要由系统按活动、参与次数、团队容量和库存等实时条件校验。",
+      "source_type": "domain_rule",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-infrastructure/src/main/java/cn/bugstack/infrastructure/adapter/repository/TradeRepository.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/service/lock/filter/TeamStockOccupyRuleFilter.java"
+      ],
+      "source_symbols": [
+        "TradeRepository.lockMarketPayOrder",
+        "TeamStockOccupyRuleFilter.apply"
+      ],
+      "version": "v1",
+      "tags": ["开团", "参团", "团队", "锁单"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_team_complete_rule",
+      "title": "拼团成团条件",
+      "category": "team_rule",
+      "content": "团队在支付结算后累计完成支付人数。当完成支付人数达到该团队目标人数时，团队进入完成状态。具体团队当前人数和状态需要查询实时订单事实。",
+      "source_type": "domain_rule",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-infrastructure/src/main/java/cn/bugstack/infrastructure/adapter/repository/TradeRepository.java",
+        "group-buy-market-types/src/main/java/cn/bugstack/types/enums/GroupBuyOrderEnumVO.java"
+      ],
+      "source_symbols": [
+        "TradeRepository.settlementMarketPayOrder",
+        "GroupBuyOrderEnumVO.COMPLETE"
+      ],
+      "version": "v1",
+      "tags": ["成团", "完成", "人数", "completeCount"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_team_count_semantics",
+      "title": "团队人数指标的含义",
+      "category": "status_explanation",
+      "content": "targetCount 表示团队目标人数，lockCount 表示已锁定订单数量，completeCount 表示已完成支付结算的人数。它们的具体数值会随交易变化，应通过实时订单事实查询。",
+      "source_type": "domain_value_object",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/model/entity/GroupBuyTeamEntity.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/model/valobj/GroupBuyProgressVO.java",
+        "group-buy-market-infrastructure/src/main/java/cn/bugstack/infrastructure/adapter/repository/TradeRepository.java"
+      ],
+      "source_symbols": [
+        "GroupBuyTeamEntity.targetCount",
+        "GroupBuyTeamEntity.lockCount",
+        "GroupBuyTeamEntity.completeCount",
+        "TradeRepository.settlementMarketPayOrder"
+      ],
+      "version": "v1",
+      "tags": ["人数", "targetCount", "lockCount", "completeCount"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_team_status_semantics",
+      "title": "团队状态的一般含义",
+      "category": "status_explanation",
+      "content": "当前项目定义的团队状态包括拼单中、完成、失败和完成含退单。状态名称用于解释团队的本地拼团进度；某个团队当前处于哪种状态必须查询实时事实。",
+      "source_type": "domain_enum",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-types/src/main/java/cn/bugstack/types/enums/GroupBuyOrderEnumVO.java"
+      ],
+      "source_symbols": ["GroupBuyOrderEnumVO"],
+      "version": "v1",
+      "tags": ["团队状态", "拼单中", "完成", "失败", "退单"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_order_status_semantics",
+      "title": "交易订单状态的一般含义",
+      "category": "status_explanation",
+      "content": "当前项目的交易订单状态包括初始创建、消费完成和用户退单。状态描述的是本地交易订单的处理阶段；具体订单状态必须通过实时订单事实确认。",
+      "source_type": "domain_enum",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/model/valobj/TradeOrderStatusEnumVO.java"
+      ],
+      "source_symbols": ["TradeOrderStatusEnumVO"],
+      "version": "v1",
+      "tags": ["订单状态", "创建", "完成", "退单"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_activity_validity_rule",
+      "title": "活动状态与有效期",
+      "category": "activity_rule",
+      "content": "活动可处于创建、生效、过期或废弃等状态。参与锁单时，系统会校验活动为生效状态且当前时间处于活动有效时间范围内。某个活动现在是否可参与必须由 Java 实时校验。",
+      "source_type": "domain_rule",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-types/src/main/java/cn/bugstack/types/enums/ActivityStatusEnumVO.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/service/lock/filter/ActivityUsabilityRuleFilter.java"
+      ],
+      "source_symbols": [
+        "ActivityStatusEnumVO",
+        "ActivityUsabilityRuleFilter.apply"
+      ],
+      "version": "v1",
+      "tags": ["活动", "有效期", "生效", "参与资格"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_user_take_limit",
+      "title": "用户参与次数限制",
+      "category": "eligibility_rule",
+      "content": "活动可以配置用户参与次数上限。系统会统计用户在该活动中的已有订单记录；达到上限时将拒绝新的锁单。具体用户是否达到上限必须由 Java 实时校验。",
+      "source_type": "domain_rule",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/service/lock/filter/UserTakeLimitRuleFilter.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/model/entity/GroupBuyActivityEntity.java"
+      ],
+      "source_symbols": [
+        "UserTakeLimitRuleFilter.apply",
+        "GroupBuyActivityEntity.takeLimitCount"
+      ],
+      "version": "v1",
+      "tags": ["参与次数", "活动", "资格", "限制"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_tag_eligibility",
+      "title": "人群标签对活动资格的影响",
+      "category": "eligibility_rule",
+      "content": "活动可配置人群标签规则。标签判断会影响用户对活动的可见性和可参与性；具体用户是否属于相应人群，必须由系统根据实时标签数据判断。",
+      "source_type": "domain_rule",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/activity/service/trial/node/TagNode.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/activity/model/valobj/GroupBuyActivityDiscountVO.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/activity/model/valobj/TagScopeEnumVO.java"
+      ],
+      "source_symbols": [
+        "TagNode.doApply",
+        "GroupBuyActivityDiscountVO.isVisible",
+        "GroupBuyActivityDiscountVO.isEnable"
+      ],
+      "version": "v1",
+      "tags": ["人群标签", "可见性", "参与资格", "活动"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_discount_types_and_pricing",
+      "title": "优惠类型与最终价格",
+      "category": "pricing_rule",
+      "content": "当前项目支持直减、折扣、满减和固定价等优惠计算方式。最终优惠金额取决于商品价格、活动配置和可能的人群条件，必须由 Java 实时试算；规则知识不能自行计算当前应付价格。",
+      "source_type": "domain_strategy",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/activity/service/discount/impl/ZJCalculateService.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/activity/service/discount/impl/ZKCalculateService.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/activity/service/discount/impl/MJCalculateService.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/activity/service/discount/impl/NCalculateService.java"
+      ],
+      "source_symbols": [
+        "ZJCalculateService.doCalculate",
+        "ZKCalculateService.doCalculate",
+        "MJCalculateService.doCalculate",
+        "NCalculateService.doCalculate"
+      ],
+      "version": "v1",
+      "tags": ["优惠", "直减", "折扣", "满减", "价格"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_joinable_team_selection",
+      "title": "可加入团队的一般筛选原则",
+      "category": "team_rule",
+      "content": "系统会为当前用户查询活动下可加入的候选团队。候选团队需要处于可继续拼单的状态，并受容量、有效期和用户关系等实时条件影响。实际候选列表和统计必须查询实时团队事实。",
+      "source_type": "domain_query_rule",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/activity/service/facts/AgentJoinableTeamFactsService.java",
+        "group-buy-market-infrastructure/src/main/java/cn/bugstack/infrastructure/adapter/repository/ActivityRepository.java",
+        "group-buy-market-infrastructure/src/main/java/cn/bugstack/infrastructure/dao/IGroupBuyOrderDao.java",
+        "group-buy-market-app/src/main/resources/mybatis/mapper/group_buy_order_mapper.xml"
+      ],
+      "source_symbols": [
+        "AgentJoinableTeamFactsService.getJoinableTeamFacts",
+        "ActivityRepository.queryInProgressUserGroupBuyOrderDetailListByRandom",
+        "IGroupBuyOrderDao.queryGroupBuyProgressByTeamIds"
+      ],
+      "version": "v1",
+      "tags": ["可加入团队", "参团", "候选团队", "活动"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_timeout_unpaid_handling",
+      "title": "超时未支付订单处理",
+      "category": "refund_rule",
+      "content": "系统存在定时处理超时未支付订单的机制：发现符合条件的订单后，会进入本地退单处理流程。是否属于超时未支付以及实际处理结果，需要以系统实时状态为准。",
+      "source_type": "scheduled_domain_rule",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-trigger/src/main/java/cn/bugstack/trigger/job/TimeoutRefundJob.java",
+        "group-buy-market-infrastructure/src/main/java/cn/bugstack/infrastructure/adapter/repository/TradeRepository.java"
+      ],
+      "source_symbols": [
+        "TimeoutRefundJob.exec",
+        "TradeRepository.queryTimeoutUnpaidOrderList"
+      ],
+      "version": "v1",
+      "tags": ["超时", "未支付", "退单", "定时处理"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_unformed_team_refund",
+      "title": "未成团退单的一般机制",
+      "category": "refund_rule",
+      "content": "当前项目为未成团订单区分未支付和已支付两类本地退单处理。处理会更新本地订单或团队计数，并走通知消息路径。具体订单应采用哪种处理必须由 Java 根据实时状态组合决定。",
+      "source_type": "domain_strategy",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/model/valobj/RefundTypeEnumVO.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/service/refund/business/impl/Unpaid2RefundStrategy.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/service/refund/business/impl/Paid2RefundStrategy.java"
+      ],
+      "source_symbols": [
+        "RefundTypeEnumVO.UNPAID_UNLOCK",
+        "RefundTypeEnumVO.PAID_UNFORMED",
+        "Unpaid2RefundStrategy.refundOrder",
+        "Paid2RefundStrategy.refundOrder"
+      ],
+      "version": "v1",
+      "tags": ["未成团", "退单", "未支付", "已支付"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_formed_team_refund_impact",
+      "title": "已成团后退单对本地团队状态的影响",
+      "category": "refund_rule",
+      "content": "已支付且已成团的订单进入本地退单处理后，会调整团队本地人数计数。最后一笔退单会使团队进入失败；仍有其他完成成员时，团队进入完成含退单状态。具体影响以 Java 实时处理结果为准。",
+      "source_type": "domain_strategy",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/service/refund/business/impl/PaidTeam2RefundStrategy.java",
+        "group-buy-market-infrastructure/src/main/java/cn/bugstack/infrastructure/adapter/repository/TradeRepository.java",
+        "group-buy-market-types/src/main/java/cn/bugstack/types/enums/GroupBuyOrderEnumVO.java"
+      ],
+      "source_symbols": [
+        "PaidTeam2RefundStrategy.refundOrder",
+        "TradeRepository.paidTeam2Refund",
+        "GroupBuyOrderEnumVO.COMPLETE_FAIL",
+        "GroupBuyOrderEnumVO.FAIL"
+      ],
+      "version": "v1",
+      "tags": ["已成团", "退单", "团队状态", "完成含退单"],
+      "requires_realtime_facts": true
+    },
+    {
+      "knowledge_id": "group_buy_close_status_semantics",
+      "title": "CLOSE 状态的准确语义",
+      "category": "refund_boundary",
+      "content": "CLOSE 表示当前项目的交易订单进入用户退单关闭状态。源码能够证明本地退单处理、本地逆向状态更新和通知消息路径；但不能证明支付渠道已完成资金退款，也不能提供退款金额、退款完成时间或到账时间。",
+      "source_type": "domain_enum_and_strategy",
+      "source_level": "LEVEL_2",
+      "source_files": [
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/model/valobj/TradeOrderStatusEnumVO.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/service/refund/filter/UniqueRefundNodeFilter.java",
+        "group-buy-market-domain/src/main/java/cn/bugstack/domain/trade/service/refund/business/AbstractRefundOrderStrategy.java"
+      ],
+      "source_symbols": [
+        "TradeOrderStatusEnumVO.CLOSE",
+        "UniqueRefundNodeFilter.apply",
+        "AbstractRefundOrderStrategy.sendRefundNotifyMessage"
+      ],
+      "version": "v1",
+      "tags": ["CLOSE", "退单", "退款", "资金到账", "状态"],
+      "requires_realtime_facts": true
+    }
+  ]
+}
+

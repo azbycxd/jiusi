@@ -24,7 +24,11 @@ class Intent(str, Enum):
 class CapabilityState(BaseModel):
     """What the agent is permitted to do; never inferred by scanning code."""
 
-    allowed_tools: tuple[str, ...] = ("get_order_facts", "get_joinable_team_facts")
+    allowed_tools: tuple[str, ...] = (
+        "get_order_facts",
+        "get_joinable_team_facts",
+        "search_group_buy_rules",
+    )
 
 
 def _data_paths(value: object, prefix: str = "") -> dict[str, str]:

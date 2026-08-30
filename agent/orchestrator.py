@@ -17,6 +17,7 @@ from observability.trace import TraceRecorder
 from tools.errors import to_tool_result
 from tools.java_market_client import JavaMarketClient, JoinableTeamFactsTool, OrderFactsTool
 from tools.registry import ToolRegistry
+from tools.rule_search import SearchGroupBuyRulesTool
 from tools.schemas import ToolResult
 
 
@@ -39,7 +40,11 @@ class OrderFactsOrchestrator:
         self.memory = memory or SessionMemory()
         if registry is None:
             market_client = JavaMarketClient()
-            registry = ToolRegistry([OrderFactsTool(market_client), JoinableTeamFactsTool(market_client)])
+            registry = ToolRegistry([
+                OrderFactsTool(market_client),
+                JoinableTeamFactsTool(market_client),
+                SearchGroupBuyRulesTool(),
+            ])
         self.registry = registry
         self._compatibility_mode = compatibility_mode
         self._decision_stage = DecisionStage(decision_model, self.registry.available_tools) if decision_model else None

@@ -25,3 +25,21 @@ class JoinableTeamFactsArguments(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     activity_id: StrictInt = Field(alias="activityId", gt=0)
+
+
+class SearchGroupBuyRulesArguments(BaseModel):
+    """Only model-controllable argument for search_group_buy_rules."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: StrictStr = Field(min_length=1, max_length=500)
+
+    @field_validator("query")
+    @classmethod
+    def query_must_not_be_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("RULE_SEARCH_QUERY_INVALID")
+        if len(normalized) > 500:
+            raise ValueError("RULE_SEARCH_QUERY_INVALID")
+        return normalized

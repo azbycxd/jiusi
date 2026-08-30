@@ -88,7 +88,7 @@ def test_tool_input_has_no_user_id_and_default_registry_only_exposes_allowed_fac
     assert "auth" in str(inspect.signature(JavaMarketClient.get_order_facts))
     assert "user_id" not in str(inspect.signature(JoinableTeamFactsTool.run))
     assert OrderFactsOrchestrator(compatibility_mode=True).registry.allowed_names == (
-        "get_order_facts", "get_joinable_team_facts"
+        "get_order_facts", "get_joinable_team_facts", "search_group_buy_rules"
     )
 
 
