@@ -27,6 +27,22 @@ class JoinableTeamFactsArguments(BaseModel):
     activity_id: StrictInt = Field(alias="activityId", gt=0)
 
 
+class ActivityFactsArguments(BaseModel):
+    """Only model-controllable argument for get_activity_facts."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    activity_id: StrictInt = Field(alias="activityId", gt=0)
+
+
+class UserEligibilityFactsArguments(BaseModel):
+    """Only model-controllable argument for current-user eligibility facts."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    activity_id: StrictInt = Field(alias="activityId", gt=0)
+
+
 class SearchGroupBuyRulesArguments(BaseModel):
     """Only model-controllable argument for search_group_buy_rules."""
 

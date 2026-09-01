@@ -41,3 +41,15 @@ class JoinableTeamFactsClient(Protocol):
     """High-level Java joinable-team-facts boundary used by the business Tool."""
 
     def get_joinable_team_facts(self, auth: AuthContext, activity_id: int) -> ToolResult: ...
+
+
+class ActivityFactsClient(Protocol):
+    """Java activity-level facts boundary used by the Activity Tool."""
+
+    def get_activity_facts(self, auth: AuthContext, activity_id: int) -> ToolResult: ...
+
+
+class UserEligibilityFactsClient(Protocol):
+    """Java current-user eligibility facts boundary used by the Eligibility Tool."""
+
+    def get_user_eligibility_facts(self, auth: AuthContext, activity_id: int) -> ToolResult: ...

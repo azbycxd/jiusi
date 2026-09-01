@@ -134,7 +134,7 @@ def test_registry_capability_and_repeat_policy_support_exactly_three_default_too
     ])
     state = AgentState(session_id="rules-registry", authenticated_user_id="trusted-user")
     assert registry.allowed_names == ("get_order_facts", "get_joinable_team_facts", "search_group_buy_rules")
-    assert state.capability.allowed_tools == registry.allowed_names
+    assert state.capability.allowed_tools[:3] == registry.allowed_names
     assert registry.available_tools[2]["parameters_schema"]["required"] == ["query"]
     assert tool.repeat_policy.repeatable is False and tool.repeat_policy.max_same_call == 1
 

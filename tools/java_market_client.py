@@ -11,15 +11,28 @@ from agent.slots import validate_out_trade_no
 from agent.state import AgentState
 from config.environment import load_project_env
 from guardrails.auth_context import AuthContext
-from tools.base import JoinableTeamFactsClient, MarketClient, RepeatPolicy
-from tools.arguments import JoinableTeamFactsArguments, OrderFactsArguments
+from tools.base import (
+    ActivityFactsClient,
+    JoinableTeamFactsClient,
+    MarketClient,
+    RepeatPolicy,
+    UserEligibilityFactsClient,
+)
+from tools.arguments import (
+    ActivityFactsArguments,
+    JoinableTeamFactsArguments,
+    OrderFactsArguments,
+    UserEligibilityFactsArguments,
+)
 from tools.errors import ToolConnectionError, ToolTimeoutError, to_tool_result
-from tools.facts import JoinableTeamFacts, OrderFacts
+from tools.facts import ActivityFactsResponse, JoinableTeamFacts, OrderFacts, UserEligibilityFacts
 from tools.schemas import Evidence, ToolResult
 
 
 ORDER_FACTS_PATH = "/api/v1/agent/order/facts"
 JOINABLE_TEAM_FACTS_PATH = "/api/v1/agent/team/joinable-facts"
+ACTIVITY_FACTS_PATH = "/api/v1/agent/activity/facts"
+USER_ELIGIBILITY_FACTS_PATH = "/api/v1/agent/activity/eligibility-facts"
 
 
 @dataclass(frozen=True)
@@ -83,6 +96,32 @@ class JavaMarketClient:
         code = envelope["code"]
         if code == "0000":
             return self._joinable_team_success_from_data(envelope.get("data"))
+        return self._error_for_java_code(code)
+
+    def get_activity_facts(self, auth: AuthContext, activity_id: int) -> ToolResult:
+        if type(activity_id) is not int or activity_id <= 0:
+            return ToolResult.infrastructure_failure(
+                "INVALID_ARGUMENT", "活动 ID 无效或缺失", retryable=False, source=self.source
+            )
+        envelope = self._post_envelope(ACTIVITY_FACTS_PATH, auth, {"activityId": activity_id})
+        if isinstance(envelope, ToolResult):
+            return envelope
+        code = envelope["code"]
+        if code == "0000":
+            return self._activity_success_from_data(envelope.get("data"))
+        return self._error_for_java_code(code)
+
+    def get_user_eligibility_facts(self, auth: AuthContext, activity_id: int) -> ToolResult:
+        if type(activity_id) is not int or activity_id <= 0:
+            return ToolResult.infrastructure_failure(
+                "INVALID_ARGUMENT", "活动 ID 无效或缺失", retryable=False, source=self.source
+            )
+        envelope = self._post_envelope(USER_ELIGIBILITY_FACTS_PATH, auth, {"activityId": activity_id})
+        if isinstance(envelope, ToolResult):
+            return envelope
+        code = envelope["code"]
+        if code == "0000":
+            return self._eligibility_success_from_data(envelope.get("data"))
         return self._error_for_java_code(code)
 
     def _post_envelope(self, path: str, auth: AuthContext, body: dict[str, object]) -> dict[str, Any] | ToolResult:
@@ -187,11 +226,78 @@ class JavaMarketClient:
             source=self.source,
         )
 
+    def _activity_success_from_data(self, data: Any) -> ToolResult:
+        if not isinstance(data, dict):
+            return ToolResult.infrastructure_failure(
+                "TOOL_CONTRACT_MISMATCH", "活动事实服务响应契约不匹配", retryable=False, source=self.source
+            )
+        try:
+            facts = ActivityFactsResponse.model_validate(data)
+        except ValidationError:
+            return ToolResult.infrastructure_failure(
+                "TOOL_CONTRACT_MISMATCH", "活动事实服务响应契约不匹配", retryable=False, source=self.source
+            )
+        activity = facts.activity
+        evidence = [
+            Evidence(kind="activity.activity_id", value=str(activity.activity_id), source=self.source),
+            Evidence(kind="activity.status", value=activity.status, source=self.source),
+            Evidence(kind="activity.start_time", value=activity.start_time, source=self.source),
+            Evidence(kind="activity.end_time", value=activity.end_time, source=self.source),
+            Evidence(kind="activity.tag_scope", value=activity.tag_scope, source=self.source),
+            Evidence(kind="activity.evaluated_at", value=activity.evaluated_at, source=self.source),
+            Evidence(kind="activity.within_valid_time", value=str(activity.within_valid_time), source=self.source),
+        ]
+        if activity.user_take_limit is not None:
+            evidence.append(Evidence(
+                kind="activity.user_take_limit", value=str(activity.user_take_limit), source=self.source
+            ))
+        return ToolResult(
+            success=True,
+            message="活动事实获取成功",
+            data=facts.as_context_data(),
+            evidence=evidence,
+            source=self.source,
+        )
+
+    def _eligibility_success_from_data(self, data: Any) -> ToolResult:
+        if not isinstance(data, dict):
+            return ToolResult.infrastructure_failure(
+                "TOOL_CONTRACT_MISMATCH", "用户参与资格事实服务响应契约不匹配", retryable=False, source=self.source
+            )
+        try:
+            facts = UserEligibilityFacts.model_validate(data)
+        except ValidationError:
+            return ToolResult.infrastructure_failure(
+                "TOOL_CONTRACT_MISMATCH", "用户参与资格事实服务响应契约不匹配", retryable=False, source=self.source
+            )
+        evidence = [
+            Evidence(kind="activity_id", value=str(facts.activity_id), source=self.source),
+            Evidence(kind="tag_rule_configured", value=str(facts.tag_rule_configured), source=self.source),
+            Evidence(kind="tag_crowd_data_available", value=str(facts.tag_crowd_data_available), source=self.source),
+            Evidence(kind="tag_gate_passed", value=str(facts.tag_gate_passed), source=self.source),
+            Evidence(kind="tag_visibility_allowed", value=str(facts.tag_visibility_allowed), source=self.source),
+            Evidence(kind="tag_participation_allowed", value=str(facts.tag_participation_allowed), source=self.source),
+            Evidence(kind="user_take_count", value=str(facts.user_take_count), source=self.source),
+            Evidence(kind="participation_limit_reached", value=str(facts.participation_limit_reached), source=self.source),
+            Evidence(kind="market_downgraded", value=str(facts.market_downgraded), source=self.source),
+            Evidence(kind="user_within_release_range", value=str(facts.user_within_release_range), source=self.source),
+        ]
+        if facts.user_take_limit is not None:
+            evidence.append(Evidence(kind="user_take_limit", value=str(facts.user_take_limit), source=self.source))
+        return ToolResult(
+            success=True,
+            message="当前用户参与资格事实获取成功",
+            data=facts.as_context_data(),
+            evidence=evidence,
+            source=self.source,
+        )
+
     def _error_for_java_code(self, code: str) -> ToolResult:
         mapping: dict[str, tuple[bool, str]] = {
             "AUTH_REQUIRED": (False, "当前账号未完成市场事实查询认证"),
             "INVALID_ARGUMENT": (False, "市场事实查询参数无效"),
             "ORDER_NOT_FOUND_OR_NOT_AUTHORIZED": (False, "订单不存在，或当前账号无权查看该订单"),
+            "ACTIVITY_NOT_FOUND": (False, "活动不存在或当前账号无权查看该活动"),
             "INTERNAL_SERVICE_ERROR": (True, "市场事实服务暂时不可用"),
         }
         if code in mapping:
@@ -253,5 +359,53 @@ class JoinableTeamFactsTool:
         auth = AuthContext(authenticated_user_id=state.authenticated_user_id)
         try:
             return self._client.get_joinable_team_facts(auth=auth, activity_id=arguments.activity_id)
+        except Exception as error:
+            return to_tool_result(error, source=self.name)
+
+
+class ActivityFactsTool:
+    name = "get_activity_facts"
+    description = (
+        "Read real-time activity-level status, configured time window, tag scope, and participation limit facts "
+        "for an existing activityId. Use when activity status or time configuration is needed."
+    )
+    arguments_schema = ActivityFactsArguments
+    repeat_policy = RepeatPolicy(repeatable=False, max_same_call=1)
+
+    def __init__(self, client: ActivityFactsClient | None = None) -> None:
+        self._client = client or JavaMarketClient()
+
+    def run(self, state: AgentState, arguments: ActivityFactsArguments) -> ToolResult:
+        if not isinstance(state.authenticated_user_id, str) or not state.authenticated_user_id.strip():
+            return ToolResult.infrastructure_failure(
+                "AUTH_REQUIRED", "缺少可信认证身份，无法查询活动事实", retryable=False, source=self.name
+            )
+        auth = AuthContext(authenticated_user_id=state.authenticated_user_id)
+        try:
+            return self._client.get_activity_facts(auth=auth, activity_id=arguments.activity_id)
+        except Exception as error:
+            return to_tool_result(error, source=self.name)
+
+
+class UserEligibilityFactsTool:
+    name = "get_user_eligibility_facts"
+    description = (
+        "Read current authenticated user's participation eligibility facts for an existing activityId, including "
+        "tag gates, participation counts, downgrade, and release-range constraints."
+    )
+    arguments_schema = UserEligibilityFactsArguments
+    repeat_policy = RepeatPolicy(repeatable=False, max_same_call=1)
+
+    def __init__(self, client: UserEligibilityFactsClient | None = None) -> None:
+        self._client = client or JavaMarketClient()
+
+    def run(self, state: AgentState, arguments: UserEligibilityFactsArguments) -> ToolResult:
+        if not isinstance(state.authenticated_user_id, str) or not state.authenticated_user_id.strip():
+            return ToolResult.infrastructure_failure(
+                "AUTH_REQUIRED", "缺少可信认证身份，无法查询当前用户参与资格事实", retryable=False, source=self.name
+            )
+        auth = AuthContext(authenticated_user_id=state.authenticated_user_id)
+        try:
+            return self._client.get_user_eligibility_facts(auth=auth, activity_id=arguments.activity_id)
         except Exception as error:
             return to_tool_result(error, source=self.name)

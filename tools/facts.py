@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 
 class OrderFact(BaseModel):
@@ -64,6 +64,53 @@ class JoinableTeamFacts(BaseModel):
     activity_id: StrictInt = Field(alias="activityId", gt=0)
     candidate_teams: list[CandidateTeamFacts] = Field(alias="candidateTeams")
     statistics: TeamStatistics
+
+    def as_context_data(self) -> dict:
+        return self.model_dump(mode="json")
+
+
+class ActivityDetails(BaseModel):
+    """Validated activity-level facts returned by the Java activity endpoint."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    activity_id: StrictInt = Field(alias="activityId", gt=0)
+    status: StrictStr
+    start_time: StrictStr = Field(alias="startTime")
+    end_time: StrictStr = Field(alias="endTime")
+    tag_scope: StrictStr = Field(alias="tagScope")
+    user_take_limit: StrictInt | None = Field(alias="userTakeLimit")
+    evaluated_at: StrictStr = Field(alias="evaluatedAt")
+    within_valid_time: StrictBool = Field(alias="withinValidTime")
+
+
+class ActivityFactsResponse(BaseModel):
+    """Normalized Python contract for Java activity facts."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    activity: ActivityDetails
+
+    def as_context_data(self) -> dict:
+        return self.model_dump(mode="json")
+
+
+class UserEligibilityFacts(BaseModel):
+    """Validated current-user participation facts for one activity."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    activity_id: StrictInt = Field(alias="activityId", gt=0)
+    tag_rule_configured: StrictBool = Field(alias="tagRuleConfigured")
+    tag_crowd_data_available: StrictBool = Field(alias="tagCrowdDataAvailable")
+    tag_gate_passed: StrictBool = Field(alias="tagGatePassed")
+    tag_visibility_allowed: StrictBool = Field(alias="tagVisibilityAllowed")
+    tag_participation_allowed: StrictBool = Field(alias="tagParticipationAllowed")
+    user_take_count: StrictInt = Field(alias="userTakeCount", ge=0)
+    user_take_limit: StrictInt | None = Field(alias="userTakeLimit")
+    participation_limit_reached: StrictBool = Field(alias="participationLimitReached")
+    market_downgraded: StrictBool = Field(alias="marketDowngraded")
+    user_within_release_range: StrictBool = Field(alias="userWithinReleaseRange")
 
     def as_context_data(self) -> dict:
         return self.model_dump(mode="json")

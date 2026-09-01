@@ -217,7 +217,8 @@ def test_joinable_tool_metadata_registry_capability_and_unknown_tool_boundaries(
     assert "candidate teams" in registry.available_tools[1]["description"]
     assert "get_joinable_team_facts" not in inspect.getsource(ToolRegistry)
     assert state.capability.allowed_tools == (
-        "get_order_facts", "get_joinable_team_facts", "search_group_buy_rules"
+        "get_order_facts", "get_joinable_team_facts", "search_group_buy_rules",
+        "get_activity_facts", "get_user_eligibility_facts",
     )
     arguments = registry.validate_arguments("get_joinable_team_facts", {"activityId": 100123})
     assert isinstance(arguments, JoinableTeamFactsArguments)

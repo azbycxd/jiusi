@@ -8,7 +8,8 @@ from tools.schemas import Evidence, ToolResult
 def test_state_has_separated_capability_context_and_control() -> None:
     state = AgentState(session_id="s-1", authenticated_user_id="trusted-user")
     assert state.capability.allowed_tools == (
-        "get_order_facts", "get_joinable_team_facts", "search_group_buy_rules"
+        "get_order_facts", "get_joinable_team_facts", "search_group_buy_rules",
+        "get_activity_facts", "get_user_eligibility_facts",
     )
     assert state.intent is Intent.UNKNOWN
     assert state.status is AgentStatus.RUNNING

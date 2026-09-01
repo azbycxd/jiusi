@@ -28,6 +28,8 @@ class CapabilityState(BaseModel):
         "get_order_facts",
         "get_joinable_team_facts",
         "search_group_buy_rules",
+        "get_activity_facts",
+        "get_user_eligibility_facts",
     )
 
 

@@ -15,7 +15,13 @@ from decision.stage import DecisionStage, DecisionStageResult
 from memory.session_memory import SessionMemory
 from observability.trace import TraceRecorder
 from tools.errors import to_tool_result
-from tools.java_market_client import JavaMarketClient, JoinableTeamFactsTool, OrderFactsTool
+from tools.java_market_client import (
+    ActivityFactsTool,
+    JavaMarketClient,
+    JoinableTeamFactsTool,
+    OrderFactsTool,
+    UserEligibilityFactsTool,
+)
 from tools.registry import ToolRegistry
 from tools.rule_search import SearchGroupBuyRulesTool
 from tools.schemas import ToolResult
@@ -44,6 +50,8 @@ class OrderFactsOrchestrator:
                 OrderFactsTool(market_client),
                 JoinableTeamFactsTool(market_client),
                 SearchGroupBuyRulesTool(),
+                ActivityFactsTool(market_client),
+                UserEligibilityFactsTool(market_client),
             ])
         self.registry = registry
         self._compatibility_mode = compatibility_mode
