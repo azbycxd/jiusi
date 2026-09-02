@@ -54,7 +54,8 @@ def test_prompt_distinguishes_general_rules_from_missing_instance_facts() -> Non
     assert "Classify the request by the information needed" in SYSTEM_PROMPT
     assert "General rules, concepts, and status meanings may be answered" in SYSTEM_PROMPT
     assert "can never substitute for missing instance facts" in SYSTEM_PROMPT
-    assert "choose HANDOFF even when a" in SYSTEM_PROMPT
+    assert "choose REQUEST_INPUT when a" in SYSTEM_PROMPT
+    assert "otherwise choose\nHANDOFF even when a" in SYSTEM_PROMPT
     assert "limited reply could say that it cannot be confirmed" in SYSTEM_PROMPT
     assert "退款什么时候到账" not in SYSTEM_PROMPT
     assert "if \"退款" not in SYSTEM_PROMPT

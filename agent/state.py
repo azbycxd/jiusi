@@ -5,12 +5,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from agent.diagnosis_progress import DiagnosisProgress
 from tools.schemas import Evidence, ToolResult
 
 
 class AgentStatus(str, Enum):
     RUNNING = "RUNNING"
     WAITING_USER = "WAITING_USER"
+    WAITING_INPUT = "WAITING_INPUT"
     FINISHED = "FINISHED"
     FAILED = "FAILED"
     HANDOFF = "HANDOFF"
@@ -94,6 +96,10 @@ class ContextState(BaseModel):
     team_id: str | None = None
     activity_id: str | None = None
     missing_fields: list[str] = Field(default_factory=list)
+    # Dynamic REQUEST_INPUT only: preserve the open task while the user supplies
+    # one missing Tool parameter in the same authenticated session.
+    pending_user_query: str | None = None
+    diagnosis_progress: DiagnosisProgress | None = None
     tool_results: list[ToolResult] = Field(default_factory=list)
     observations: list[Observation] = Field(default_factory=list)
     model_decision: dict[str, Any] | None = None
@@ -149,6 +155,8 @@ class AgentState(BaseModel):
     def observations(self) -> list[Observation]: return self.context.observations
     @property
     def diagnosis_code(self) -> str | None: return self.context.diagnosis_code
+    @property
+    def diagnosis_progress(self) -> DiagnosisProgress | None: return self.context.diagnosis_progress
     @property
     def retry_count(self) -> int: return self.control.retry_count
     @property

@@ -58,3 +58,16 @@ def test_http_provider_retry_and_terminal_failure_are_safe(monkeypatch):
     monkeypatch.setattr(api, "orchestrator", OrderFactsOrchestrator(registry=ToolRegistry([OrderFactsTool(FakeMarketClient({}))]), decision_model=AlwaysTimeout()))
     terminal = client.post("/v1/chat", headers={"X-Authenticated-User-Id": "trusted"}, json={"session_id": "terminal", "message": "你会什么？"})
     assert terminal.status_code == 200 and terminal.json()["status"] == "HANDOFF" and "MODEL_TIMEOUT" not in terminal.text
+
+
+def test_http_request_input_returns_waiting_status_and_missing_fields(monkeypatch):
+    _install(monkeypatch, [{"action": "REQUEST_INPUT", "missing_information": ["activityId"]}])
+    response = TestClient(api.app).post(
+        "/v1/chat", headers={"X-Authenticated-User-Id": "trusted"},
+        json={"session_id": "request-input", "message": "为什么我参加不了这个活动？"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "session_id": "request-input", "status": "WAITING_INPUT",
+        "answer": "请补充以下信息后继续：activityId", "missing_fields": ["activityId"], "needs_human": False,
+    }

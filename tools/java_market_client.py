@@ -365,6 +365,8 @@ class JoinableTeamFactsTool:
 
 class ActivityFactsTool:
     name = "get_activity_facts"
+    # Internal completion metadata only; it is not exposed in the LLM Tool schema.
+    diagnosis_dimension = "activity"
     description = (
         "Read real-time activity-level status, configured time window, tag scope, and participation limit facts "
         "for an existing activityId. Use when activity status or time configuration is needed."
@@ -389,6 +391,8 @@ class ActivityFactsTool:
 
 class UserEligibilityFactsTool:
     name = "get_user_eligibility_facts"
+    # Internal completion metadata only; it is not exposed in the LLM Tool schema.
+    diagnosis_dimension = "eligibility"
     description = (
         "Read current authenticated user's participation eligibility facts for an existing activityId, including "
         "tag gates, participation counts, downgrade, and release-range constraints."

@@ -49,6 +49,9 @@ class RecordingDecisionModel:
             "observation_tools": [item.tool_name for item in context.observations],
             "evidence_kinds": [item["kind"] for item in context.evidence],
             "available_tool_names": [item.name for item in context.available_tools],
+            "diagnosis_progress": (
+                context.diagnosis_progress.model_dump(mode="json") if context.diagnosis_progress else None
+            ),
         }
         raw = self._delegate.decide(context)
         self.last_telemetry = self._delegate.last_telemetry
@@ -151,6 +154,9 @@ def _run_case(agent, model, registry, trace_capture, *, case: str, session_id: s
             {"tool_name": item.tool_name, "evidence_kinds": [evidence.kind for evidence in item.evidence]}
             for item in state.observations
         ],
+        "diagnosis_progress": (
+            state.diagnosis_progress.model_dump(mode="json") if state.diagnosis_progress else None
+        ),
         "trace": [
             {
                 key: event.get(key)

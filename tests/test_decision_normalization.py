@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from agent.state import Observation
 from decision.normalization import normalize_agent_decision_payload
-from decision.schemas import AnswerDecision, CallToolDecision, HandoffDecision, parse_agent_decision
+from decision.schemas import AnswerDecision, CallToolDecision, HandoffDecision, RequestInputDecision, parse_agent_decision
 from decision.validation import canonicalize_evidence_paths, validate_evidence
 from tools.arguments import OrderFactsArguments
 from tools.schemas import Evidence
@@ -54,6 +54,21 @@ def test_handoff_missing_information_string_is_wrapped_without_rewriting_text() 
     normalized = normalize_agent_decision_payload(raw)
     assert normalized["missing_information"] == ["refund status"]
     assert isinstance(parse_agent_decision(normalized), HandoffDecision)
+
+
+def test_request_input_requires_concise_missing_fields_and_rejects_other_action_fields() -> None:
+    normalized = normalize_agent_decision_payload({
+        "action": "REQUEST_INPUT", "missing_information": "activityId", "tool_arguments": {},
+    })
+    assert normalized["missing_information"] == ["activityId"]
+    assert isinstance(parse_agent_decision(normalized), RequestInputDecision)
+    for invalid in (
+        {"action": "REQUEST_INPUT", "missing_information": []},
+        {"action": "REQUEST_INPUT", "missing_information": [" "]},
+        {"action": "REQUEST_INPUT", "missing_information": ["activityId"], "final_answer": "answer"},
+    ):
+        with pytest.raises(ValidationError):
+            parse_agent_decision(normalize_agent_decision_payload(invalid))
 
 
 def test_handoff_list_is_preserved_empty_string_is_removed_and_invalid_values_are_rejected() -> None:

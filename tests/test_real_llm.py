@@ -67,7 +67,8 @@ def test_real_adapter_converts_legal_call_tool_response_and_uses_safe_payload() 
         assert "llm-secret-value" not in serialized
         assert "trusted-user" not in serialized
         visible = json.loads(body["messages"][1]["content"])
-        assert set(visible) == {"user_query", "available_tools", "observations", "evidence"}
+        assert set(visible) == {"user_query", "diagnosis_progress", "available_tools", "observations", "evidence"}
+        assert visible["diagnosis_progress"] is None
         assert visible["available_tools"][0]["parameters_schema"]["required"] == ["outTradeNo"]
         return httpx.Response(200, json=provider_payload(json.dumps({
             "action": "CALL_TOOL", "tool_name": "get_order_facts",
@@ -91,6 +92,12 @@ def test_prompt_and_provider_payload_follow_dynamic_tool_contracts_without_fixed
     assert "available_tools metadata" in SYSTEM_PROMPT
     assert "must set used_evidence to []" in SYSTEM_PROMPT
     assert "you can do" not in SYSTEM_PROMPT.lower()
+    assert "one verified condition is not automatically a complete\ndiagnosis" in SYSTEM_PROMPT
+    assert "do not assume a fixed tool order or call every tool" in SYSTEM_PROMPT
+    assert "Do not use a rule lookup unless a rule explanation is actually needed" in SYSTEM_PROMPT
+    assert "REQUEST_INPUT" in SYSTEM_PROMPT
+    assert "instead of exploring an unrelated available capability" in SYSTEM_PROMPT
+    assert "takes precedence over REQUEST_INPUT" in SYSTEM_PROMPT
     for forbidden in ("userId", "authenticated_user_id", "token", "headers", "auth context", "SQL", "base_url"):
         assert forbidden in SYSTEM_PROMPT
     assert "get_order_facts -> get_joinable_team_facts" not in SYSTEM_PROMPT

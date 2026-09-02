@@ -6,6 +6,7 @@ from dataclasses import replace
 
 from pydantic import BaseModel
 
+from agent.diagnosis_progress import DiagnosisProgress
 from agent.router import RoutingResult, route
 from agent.state import AgentState, AgentStatus, Observation
 from agent.termination import TerminationPolicy
@@ -66,13 +67,24 @@ class OrderFactsOrchestrator:
         ):
             state = AgentState(session_id=session_id, authenticated_user_id=authenticated_user_id)
 
+        resuming_input = state.status is AgentStatus.WAITING_INPUT
         state.control.status = AgentStatus.RUNNING
         state.control.needs_human = False
         state.control.final_answer = None
         state.control.iteration_count += 1
         trace = TraceRecorder()
         if self._decision_stage:
-            state.context.user_query = user_query.strip()
+            if resuming_input:
+                pending_query = state.context.pending_user_query or state.context.user_query
+                state.context.user_query = f"{pending_query}\n用户补充信息：{user_query.strip()}"
+                state.context.pending_user_query = None
+                state.context.missing_fields = []
+            else:
+                state.context.user_query = user_query.strip()
+                state.context.diagnosis_progress = DiagnosisProgress.for_open_diagnosis(
+                    state.context.user_query,
+                    self.registry.diagnosis_dimensions(state.capability.allowed_tools),
+                )
             self._trace(trace, state, stage="INPUT_PREPARED", action="normalize_input")
             if TerminationPolicy.enforce(state):
                 return self._save(state, trace)
@@ -131,12 +143,31 @@ class OrderFactsOrchestrator:
             )
 
             if decision.action is AgentAction.ANSWER:
+                if not self._can_accept_answer(state, trace):
+                    state.control.iteration_count += 1
+                    continue
                 state.control.status = AgentStatus.FINISHED
                 state.control.final_answer = decision.final_answer
+                return self._save(state, trace)
+            if decision.action is AgentAction.REQUEST_INPUT:
+                state.context.missing_fields = decision.missing_information
+                state.context.pending_user_query = state.context.user_query
+                state.control.status = AgentStatus.WAITING_INPUT
+                state.control.needs_human = False
+                state.control.final_answer = "请补充以下信息后继续：" + "、".join(decision.missing_information)
+                self._trace(trace, state, stage="REQUEST_INPUT", action="request_input")
                 return self._save(state, trace)
             if decision.action is AgentAction.HANDOFF:
                 TerminationPolicy.handoff(state, "模型建议转人工客服处理。")
                 return self._save(state, trace)
+
+            if self._diagnosis_is_complete(state):
+                self._trace(
+                    trace, state, stage="DIAGNOSIS_PROGRESS_BLOCKED", action="block_unnecessary_tool",
+                    tool_name=decision.tool_name, error_code="DIAGNOSIS_ALREADY_COMPLETE",
+                )
+                state.control.iteration_count += 1
+                continue
 
             arguments = self._validate_tool_action(state, trace, decision.tool_name, decision.tool_arguments)
             if arguments is None:
@@ -182,11 +213,26 @@ class OrderFactsOrchestrator:
         )
         return f"{tool_name}:{arguments_json}"
 
+    @staticmethod
+    def _diagnosis_is_complete(state: AgentState) -> bool:
+        return state.diagnosis_progress is not None and state.diagnosis_progress.is_complete
+
+    def _can_accept_answer(self, state: AgentState, trace: TraceRecorder) -> bool:
+        progress = state.diagnosis_progress
+        if progress is None or progress.is_complete:
+            return True
+        self._trace(
+            trace, state, stage="DIAGNOSIS_PROGRESS_BLOCKED", action="block_premature_answer",
+            error_code="DIAGNOSIS_DIMENSIONS_REMAIN",
+        )
+        return False
+
     def _ask_model(self, state: AgentState, trace: TraceRecorder) -> DecisionStageResult:
         assert self._decision_stage is not None
         context = self._decision_stage.build_context(
             user_query=state.user_query,
             observations=state.observations,
+            diagnosis_progress=state.diagnosis_progress,
         )
         for _ in range(state.control.max_model_retries + 1):
             state.control.model_call_count += 1
@@ -259,10 +305,10 @@ class OrderFactsOrchestrator:
                 state.control.retry_count += 1
                 continue
             if result.retryable:
-                TerminationPolicy.handoff(state, "订单事实服务暂时不可用且重试已达上限，已转人工客服处理。")
+                TerminationPolicy.handoff(state, "所需业务事实服务暂时不可用且重试已达上限，已转人工客服处理。")
             else:
                 state.control.status = AgentStatus.FAILED
-                state.control.final_answer = "暂时无法获取订单事实，请联系人工客服协助处理。"
+                state.control.final_answer = "暂时无法获取所需业务事实，请联系人工客服协助处理。"
             return False
         return False
 
@@ -275,13 +321,16 @@ class OrderFactsOrchestrator:
         elif routing.has_out_trade_no_candidate:
             state.context.out_trade_no = None
 
-    @staticmethod
-    def _apply_tool_result(state: AgentState, tool_name: str, result: ToolResult) -> None:
+    def _apply_tool_result(self, state: AgentState, tool_name: str, result: ToolResult) -> None:
         state.context.tool_results.append(result)
         if not result.success:
             return
         observation = Observation.from_successful_tool_result(tool_name, result)
         state.context.observations.append(observation)
+        if state.context.diagnosis_progress is not None:
+            state.context.diagnosis_progress = state.context.diagnosis_progress.mark_checked(
+                self.registry.diagnosis_dimension(tool_name)
+            )
         references = observation.data.get("references")
         if isinstance(references, dict):
             state.context.team_id = str(references["team_id"]) if references.get("team_id") is not None else None

@@ -26,6 +26,22 @@ class ToolRegistry:
         tool = self.get(name)
         return tool.repeat_policy if tool is not None else None
 
+    def diagnosis_dimension(self, name: str) -> str | None:
+        """Return optional internal completion metadata; never part of Tool arguments."""
+        value = getattr(self.get(name), "diagnosis_dimension", None)
+        return value if isinstance(value, str) and value else None
+
+    def diagnosis_dimensions(self, allowed_tools: tuple[str, ...]) -> tuple[str, ...]:
+        """Expose only registered, currently allowed dimensions in registry order."""
+        dimensions: list[str] = []
+        for name in self.allowed_names:
+            if name not in allowed_tools:
+                continue
+            dimension = self.diagnosis_dimension(name)
+            if dimension is not None and dimension not in dimensions:
+                dimensions.append(dimension)
+        return tuple(dimensions)
+
     @property
     def allowed_names(self) -> tuple[str, ...]:
         return tuple(self._tools)

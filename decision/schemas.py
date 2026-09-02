@@ -5,12 +5,14 @@ from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
+from agent.diagnosis_progress import DiagnosisProgress
 from agent.state import Observation
 
 
 class AgentAction(str, Enum):
     CALL_TOOL = "CALL_TOOL"
     ANSWER = "ANSWER"
+    REQUEST_INPUT = "REQUEST_INPUT"
     HANDOFF = "HANDOFF"
 
 
@@ -28,6 +30,7 @@ class DecisionContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     user_query: str
+    diagnosis_progress: DiagnosisProgress | None = None
     observations: list[Observation] = Field(default_factory=list)
     available_tools: tuple[AvailableTool, ...]
 
@@ -77,8 +80,25 @@ class HandoffDecision(BaseModel):
     missing_information: list[str] = Field(default_factory=list)
 
 
+class RequestInputDecision(BaseModel):
+    """Ask for user-supplied Tool input while retaining the current task session."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal[AgentAction.REQUEST_INPUT]
+    missing_information: list[str] = Field(min_length=1, max_length=5)
+
+    @field_validator("missing_information")
+    @classmethod
+    def missing_information_must_be_concrete(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values]
+        if any(not value or len(value) > 64 for value in normalized):
+            raise ValueError("REQUEST_INPUT requires concise non-blank missing information")
+        return normalized
+
+
 AgentDecision: TypeAlias = Annotated[
-    CallToolDecision | AnswerDecision | HandoffDecision,
+    CallToolDecision | AnswerDecision | RequestInputDecision | HandoffDecision,
     Field(discriminator="action"),
 ]
 

@@ -20,6 +20,7 @@ def normalize_agent_decision_payload(payload: object) -> object:
     removable_by_action: dict[AgentAction, tuple[str, ...]] = {
         AgentAction.CALL_TOOL: ("final_answer", "used_evidence", "missing_information"),
         AgentAction.ANSWER: ("tool_name", "tool_arguments", "missing_information"),
+        AgentAction.REQUEST_INPUT: ("tool_name", "tool_arguments", "final_answer", "used_evidence"),
         AgentAction.HANDOFF: ("tool_name", "tool_arguments", "final_answer", "used_evidence"),
     }
     try:
@@ -27,7 +28,7 @@ def normalize_agent_decision_payload(payload: object) -> object:
         fields = removable_by_action[action]
     except (ValueError, TypeError):
         return normalized
-    if action is AgentAction.HANDOFF and isinstance(normalized.get("missing_information"), str):
+    if action in {AgentAction.HANDOFF, AgentAction.REQUEST_INPUT} and isinstance(normalized.get("missing_information"), str):
         if normalized["missing_information"].strip():
             # The Provider occasionally emits the one valid missing-information
             # item without its required list container. Preserve its text exactly.

@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from decision.errors import ModelAdapterError
 from decision.model import DecisionModel
 from decision.normalization import normalize_agent_decision_payload
+from agent.diagnosis_progress import DiagnosisProgress
 from agent.state import Observation
 from decision.schemas import AgentDecision, AvailableTool, DecisionContext, parse_agent_decision
 from decision.telemetry import ModelTelemetry
@@ -30,9 +31,12 @@ class DecisionStage:
         self._model = model
         self._available_tools = available_tools
 
-    def build_context(self, *, user_query: str, observations: list[Observation]) -> DecisionContext:
+    def build_context(
+        self, *, user_query: str, observations: list[Observation], diagnosis_progress: DiagnosisProgress | None = None
+    ) -> DecisionContext:
         return DecisionContext(
             user_query=user_query,
+            diagnosis_progress=diagnosis_progress,
             observations=observations,
             available_tools=tuple(AvailableTool.model_validate(tool) for tool in self._available_tools),
         )
