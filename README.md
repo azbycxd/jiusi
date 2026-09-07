@@ -1,46 +1,42 @@
-# 拼团客服与订单诊断 Agent（V1 骨架）
+# Group Buy Agent
 
-这是现有 Java 拼团系统的独立 Python Agent 服务。当前 Phase 2C-1.1 提供受控的动态 Agent Loop：模型只能提出严格的 `CALL_TOOL`、`ANSWER` 或 `HANDOFF` 决策，编排器验证并执行允许的工具。当前只有 `get_order_facts`，不生成“为什么未成团”的业务诊断。
+Evidence-Grounded Business Diagnosis Agent：面向拼团业务的独立 Python Agent 服务。它以可信 Java 业务事实与规则知识为依据完成诊断，不直连数据库、不执行写操作，也不把身份控制交给模型。
 
-## 职责边界
+## Architecture
 
-Java 继续负责订单/拼团/活动的真实状态、资格、权限、MySQL、Redis、业务规则、事务、幂等和任何写操作。Python 负责自然语言入口、路由、槽位、State、Tool 编排、错误恢复、Guardrail、Trace 与 Eval。
+`Client → FastAPI /v1/chat → Orchestrator + AgentState → DecisionContext → RealLLMDecisionModel → validated Decision → ToolRegistry → AgentTool → Java / RAG → Observation + Evidence → ANSWER / REQUEST_INPUT / HANDOFF`
 
-因此 Agent 不直连 DB 或 Redis：它不应绕过 Java 的权限校验、事务/幂等约束和业务事实边界。它不执行 SQL、Shell、任意 HTTP，也不能退款或修改订单。实时事实只能通过配置化的 Java 高层只读 `/api/v1/agent/order/facts` API 获取。
+`AgentState` 保存控制状态、当前会话和 Observation；`DecisionContext` 只向模型暴露当前问题、相关 Observation/Evidence、诊断进度与显式 Tool 描述。可信身份、认证 Header、内部异常、Trace 与服务配置不会进入模型上下文。
 
-## 控制模型
+## Agent loop
 
-`AgentState` 分开保存：Capability（显式白名单 Tool）、Context（当前任务槽位、ToolResult、OrderFacts、evidence 和去重调用历史）和 Control（状态、Tool/Model 独立重试与次数限制）。Session Memory 只是进程内任务恢复；不是长期记忆。RAG 当前只预留 FAQ/规则检索接口，绝不能判断订单实时状态。
+模型只可提出严格的 `CALL_TOOL`、`ANSWER`、`REQUEST_INPUT` 或 `HANDOFF`。编排器验证 Tool 名称、参数、Evidence 引用、重复调用与资源上限，再执行 Tool；没有固定 Workflow 或关键词 Router。`REQUEST_INPUT → WAITING_INPUT` 允许同身份同 Session 补齐实体参数后恢复原任务；能力不足或不可靠时使用 `HANDOFF`。
 
-Tool 统一返回 `ToolResult(success, error_code, message, data, evidence, retryable, source)`；不抛异常不等于业务成功。Agent Loop 为 `Decision → validation → Tool → observation → Decision`：模型可见内容仅包括用户问题、规范化 Facts/evidence 和安全 Tool Schema；可信身份、Header、Trace 和内部异常均不可见。`retry_count` 只计首次 Tool 调用失败后的额外重试次数，因此 `max_retries=1` 表示首次调用加最多一次重试；`model_retry_count` 独立计数。所有 `out_trade_no` 来源均须经过同一个确定性 Validator。`RUNNING`、`WAITING_USER`、`FINISHED`、`FAILED`、`HANDOFF` 是一等状态，且有最大迭代、Tool 调用、重试及超时配置，禁止无限循环。
+## Tools and RAG
 
-## 目录
+当前显式 allowlist 有 5 个只读 Tools：`get_order_facts`、`get_joinable_team_facts`、`get_activity_facts`、`get_user_eligibility_facts`、`search_group_buy_rules`。
 
-```
-app/             FastAPI 最小 Chat API
-agent/           State、Router、Orchestrator、Termination、Slot Validator
-tools/           ToolResult、显式 Registry、Java HTTP Client、Facts Contract、Fake Client
-memory/          进程内 Session State
-rag/             未来支持知识检索接口
-guardrails/      可信身份与 Tool 策略
-observability/   安全结构化 Trace
-eval/            8 个 V1 可运行评测样例
-tests/           单元和流程测试
-docs/            架构、Failure Ledger、评测计划
-```
+Java Facts 提供实时业务事实；RAG 仅检索规则 Catalog，不承担订单、活动或资格等实时事实。Java 返回 Facts，Python 模型基于 Evidence 作出自然语言解释，Java 不提供 LLM 诊断结论。
 
-## 运行
+## Diagnosis and grounding
 
-必须使用项目指定的 Conda 环境：
+开放式“为什么不能参与”诊断会启用最小 `DiagnosisProgress(goal, required_dimensions, checked_dimensions, remaining_dimensions)`。它只控制当前诊断是否还有直接相关的事实维度待验证，不是 Planner、长期 Memory 或 hypothesis tree。最终 ANSWER 的 `used_evidence` 必须映射到实际 Observation；Tool 参数 provenance 与 Evidence provenance 分开校验。
+
+## Security and recovery
+
+- 模型只能控制 Tool Schema 中的业务参数；trusted identity 来自 HTTP 认证上下文/AgentState。
+- 无 shell、SQL、Redis、generic HTTP 或自动注册 Tool。
+- Tool/Model 超时采用有限重试；失败映射为安全失败或 HANDOFF，不暴露 Stack、SQL、Header 或凭证。
+- Session 仅为进程内恢复；新 Session 与跨身份 Session 不继承旧 State。
+
+## Run and evaluate
+
+必须使用项目 Conda 环境：
 
 ```powershell
 conda run -n group-buy-agent python -m pip install -r requirements.txt
-conda run -n group-buy-agent python -m pytest
-conda run -n group-buy-agent uvicorn app.main:app --reload
+conda run -n group-buy-agent python -m pytest -q
+conda run -n group-buy-agent python -m uvicorn app.main:app --host 127.0.0.1 --port 8011
 ```
 
-Chat API 不接受用户 ID JSON 参数。生产环境应由认证中间件将可信身份注入；V1 用 `X-Authenticated-User-Id` Header 模拟该边界。
-
-## 尚未实现
-
-没有 RAG/向量库、Redis、数据库、长期用户画像、多 Agent、真实认证，或订单/退款写操作。动态 Loop 现可通过配置化 `RealLLMDecisionModel` 调用 OpenAI-compatible Provider；未配置完整 `LLM_MODEL`、`LLM_API_KEY`、`LLM_BASE_URL` 时，HTTP 端点明确使用 `compatibility_mode=True` 的 Phase 2B Facts-only 过渡路径，部分配置会启动失败而不会回退到 Fake 模型。Java HTTP Client 已完成独立的真实联调验收；本阶段未执行真实 LLM 请求。
+真实评测和验收记录位于 `reports/`；V3-3 覆盖真实 HTTP、真实 Provider、Java Facts、RAG、会话隔离与安全边界。开发环境的 `X-Authenticated-User-Id` 仅用于模拟可信身份边界，客户端请求体不接受用户 ID。
